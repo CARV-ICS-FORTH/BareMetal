@@ -1,8 +1,8 @@
 # BareMetal SDK
 
-A lightweight, freestanding SDK for RISC-V bare-metal development with a freestanding C23-compliant standard library (YaLibC) and comprehensive platform support.
+A lightweight SDK for RISC-V bare-metal development, with a freestanding C library (YaLibC) and comprehensive platform support.
 For now this only targets RV64 little-endian systems, but in the future we may add support for RV32 as well, and even big endian if needed. Initialy it was used
-for writing BootROM images for our RISC-V prototypes, and also platform-level tests for hw validation (a subset of those is part of the testsuite). These days we
+for writing BootROM images for our RISC-V prototypes, and also platform-level tests for hw validation (a subset of those are part of the testsuite). These days we
 also use it for further experimentation, and also for education, to help students familiarize themselves with RISC-V and bare metal programming, without having
 to study a full OS (that's why it's full of extensive comments).
 
@@ -10,7 +10,7 @@ to study a full OS (that's why it's full of extensive comments).
 
 The BareMetal SDK provides everything needed to build efficient bare-metal applications for RISC-V systems. It features:
 
-- **YaLibC**: A freestanding C23 standard library implementation
+- **YaLibC**: A minimal, C23-compliant, freestanding C library implementation
 - **Platform Layer**: Hardware abstraction for RISC-V peripherals and system features
 - **Multi-Target Support**: Build system supporting multiple hardware configurations
 - **Integrated Test Suite**: Comprehensive tests for both library functions and platform features
@@ -22,7 +22,7 @@ included in csr.h.
 
 ```
 sdk/
-├── yalibc/              # C23 standard library implementation
+├── yalibc/              # Freestanding C library
 │   ├── include/         # Public headers (string.h, stdio.h, stdlib.h, etc.)
 │   └── src/             # Library implementation
 │
@@ -51,7 +51,7 @@ sdk/
 
 ## Features
 
-### YaLibC - C23 Standard Freestanding Library
+### YaLibC
 
 - **String Operations** (`<string.h>`):
   - All mem*/str* required by C23 for freestanding implementations (earlier revisions only required headers).
