@@ -1,0 +1,450 @@
+/*
+ * SPDX-FileCopyrightText: 2021-2026 Nick Kossifidis <mick@ics.forth.gr>
+ * SPDX-FileCopyrightText: 2021-2026 ICS/FORTH
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+OUTPUT_ARCH("riscv")
+OUTPUT_FORMAT("elf64-littleriscv", "elf64-littleriscv", "elf64-littleriscv")
+ENTRY(_start)
+
+/* For more infos check out ld documentation here:
+ * https://sourceware.org/binutils/docs/ld/
+ *
+ * The RISC-V ELF psABI spec:
+ * https://github.com/riscv-non-isa/riscv-elf-psabi-doc/blob/master/riscv-elf.adoc
+ *
+ * Some useful articles:
+ * https://www.sifive.com/blog/all-aboard-part-2-relocations
+ * https://www.sifive.com/blog/all-aboard-part-3-linker-relaxation-in-riscv-toolchain
+ * https://www.sifive.com/blog/all-aboard-part-4-risc-v-code-models
+ */
+ 
+
+/* A few notes on the linker script:
+ *
+ * On a bare metal program the loader is part of its initialization, there is no OS
+ * to handle copying sections from their load address to their runtime address, and
+ * there is no virtual memory to get us a nice continuous memory region where we can
+ * place things wherever we want. There is also no runtime linker, so no GOT/PLT etc,
+ * we only do static linking here.
+ *
+ * Another constraint we have is that ram and rom may be very far away in the system's
+ * pysical memory layout, in which case pc-relative addressing of symbols wont work since
+ * we are limited to 2GB offsets (20bit + 12bit signed offset), so any symbols e.g. in
+ * .data/.bss that are more than 2GBs away from .text won't be addressible at link time.
+ * We can use gp-relative addressing as a workaround, which allows us to address symbols
+ * that are 2KB (12bit signed offset) around global pointer (the gp/x3 register, that
+ * may be initialized with an address anywhere in memory), but .data/.bss may grow larger
+ * than 4KB in which case this workaround won't work. Note that this restriction also
+ * applies to linker-defined symbols (that have no content, their value is their addres
+ * on the link table), so __data_start/end for example, or even __global_pointer$ won'table
+ * be addressible and resolving them when building the binary won't be possible.
+ *
+ * The proper woraround for this is to use the large memory model, as defined in the
+ * draft RISC-V ELF psABI spec, which creates literals for each symbol and stores them in
+ * the end of .text or in .rodata. So basically all the addresses of symbols are now
+ * stored as actual values, stored closely (or inside) .text, that can be loaded at
+ * runtime using pc-relative addressing, in the same way we load a pointer from
+ * memory. However the large model spec in psABI is still a draft, and not part of the
+ * ratified version of the spec, support for it was addressed in recent toolchains (so
+ * it's not backwards compatible), storing literals in .text breaks the pure-code concept
+ * (that marks .text as execute-only, and I want to implement here at some point using
+ * {e}PMP), it polutes the symbol table and in general it's not there yet.
+ *
+ * Until mcmodel=large becomes more mature and the spec for it gets ratified, here is
+ * the current policy:
+ *
+ * 1) Stick to mcmodel=medany, .rodata will be in rom next to .text (so no problem in
+ * addressing constants), symbols inside .data/.bss will be addressed using gp-relative
+ * addressing, so their size is limited to 4KB. This shouldn't be much of a problem for
+ * the simple programs we'll be writing here, 4KBs for global variables should be plenty
+ * (variables in the stack are relative to sp which is initialized at runtime and can
+ * be anywhere).
+ *
+ * 2) That means large allocations shouldn't be fixed/static at compile time, but performed
+ * with pointer arithmetic (that doesn't have any restrictions) at runtime. Since the use
+ * case here is a single bare metal program, without an OS, virtual memory or other programs
+ * running, we can get away with a simple bump allocator, no free/realloc is needed (see
+ * yalibc/stdlib.c).
+ *
+ * 3) To keep things clean, we declare all linker-generated symbols (everything in this
+ * linker script) on ram (after .rodata) with a three underscore prefix, we store those that
+ * we want to keep in common/boot.S, inside .srodata.ldvars, prefixed with the standard two
+ * underscore prefix, and strip all "___*" symbols after final linking (see Makefile).
+ */
+
+#define LDSCRIPT
+#include <target_config.h>
+
+/* MEMORY: Define the physical memory layout of the target system.
+ *
+ * This tells the linker about available memory regions, their locations,
+ * sizes, and permissions.
+ *
+ * Permissions: r=read, w=write, x=execute, a=allocatable, i=initialized
+ * (same as l for loadable), ! means NOT for all permissions that follow.
+ * These map internally to SEC_READONLY, SEC_DATA, SEC_CODE, SEC_ALLOC and
+ * SEC_LOAD. Note that these flags are basicaly ignored, the linker only uses
+ * them for regions not explicitly mapped (via SECTIONS below), and even then
+ * various overrides are done internally. There are absolutely no security
+ * guarantees associated with then. I use them here for clarity and to indicate
+ * intent (and maybe because they 'll actually get checked at some point).
+ *
+ * Origin and size can be overridden by platform-specific scripts (from bm_platform.h)
+ * via the __rom/ram variables, allowing one script to support multiple hardware
+ * configurations. The defaults here are for the QEMU riscv virt machine.
+ */
+MEMORY
+{
+	rom (rxai!w) : ORIGIN = DEFINED(___rom) ? ___rom : 0x20000000, LENGTH = DEFINED(___rom_size) ? ___rom_size : 256K
+	ram (rwai!x) : ORIGIN = DEFINED(___ram) ? ___ram : 0x80000000, LENGTH = DEFINED(___ram_size) ? ___ram_size : 2M
+}
+
+/* PHDRS: Define Program Headers that describe memory segments to the loader.
+ *
+ * Program headers tell the loader/OS how to map the ELF file into memory.
+ * Each PT_LOAD header describes a contiguous chunk that needs to be loaded.
+ *
+ * In bare metal, we typically don't have a loader, but these headers are
+ * still useful for:
+ * - Debuggers to understand memory layout
+ * - Objcopy to know what to include in binary output
+ * - Flash programmers to know what needs to be written where
+ *
+ * Sections are mapped to segments using :phdr syntax (see SECTIONS
+ * below).
+ */
+PHDRS
+{
+	text PT_LOAD;
+	rodata PT_LOAD;
+	data PT_LOAD;
+	bss PT_LOAD;
+}
+
+/* SECTIONS: Define how input sections are combined into output sections
+ * and where they're placed in memory.
+ *
+ * This is where the real work happens. The linker:
+ * 1. Collects input sections from all object files
+ * 2. Combines them according to these rules
+ * 3. Assigns addresses based on memory regions
+ * 4. Creates the final executable layout
+ *
+ * Syntax: .output_name address (type) : [AT(lma)] { contents } > region :phdr
+ * - address: Virtual/runtime address (where code thinks it is)
+ * - AT(lma): Load address (where it's stored, if different)
+ * - contents: Input sections to include
+ * - region: Which MEMORY region this goes into
+ * - :phdr: Which segment this belongs to
+ *
+ * Order matters! Sections are placed sequentially unless explicitly addressed.
+ */
+SECTIONS
+{
+	/*--== Loadable sections ==--*/
+
+	/* Code segments on ROM, align it to cache line size */
+	.text	ALIGN(ORIGIN(rom), 64) :
+	{
+		/* We need text._start first so that our entry point
+		 * is at the start of the binary, we also need to
+		 * make sure it won't get removed during garbage
+		 * collection, since it's not referenced by anyone */
+
+		KEEP(*(.text._start));
+		 
+		/* Although startup/exit don't make much sense here
+		 * (we are not under libc) I kept them here for
+		 * completeness, after all the .text.* rule would
+		 * catch them anyway and we need that rule in case
+		 * function-sections is used.
+		 *
+		 * For .text.hot/unlikely see -freorder-functions
+		 * For .text.sorted check out:
+		 * https://gcc.gnu.org/legacy-ml/gcc-patches/2019-09/msg01142.html
+		 */
+
+		*(.text.unlikely .text.*_unlikely .text.unlikely.*)
+		*(.text.exit .text.exit.*)
+		*(.text.startup .text.startup.*)
+		*(.text.hot .text.hot.*)
+
+		/* Used for ipa-reorder pass */
+		*(SORT_BY_NAME(.text.sorted.*))
+
+		/* Everything else.
+		 * Note that .gnu.linkonce.t.* is the old way of doing vague linking
+		 * and is deprecated in favor of COMDAT groups. I don't know why it's
+		 * in the default risc-v linker script, risc-v didn't even exist when the
+		 * switch was made from what I understand. Anyway let's be on the safe side
+		 * and keep those .gnu.linkonce.* sections around (also for sections below). */
+
+		*(.text .text.* .gnu.linkonce.t.*)
+
+		/* Align section's end to instruction size */
+		. = ALIGN(4);
+		__text_end = .;
+	} > rom :text
+	__text_start = ABSOLUTE(ADDR(.text));
+
+	/* Read-only data segments on ROM, follows text, aligned to word size */
+	.rodata	ALIGN(8) :
+	{
+		/* Start with small data, this includes sdata2 and sbss2
+		 * that are both read only and legacy (.srodata is used instead).
+		 * Note that most of small read-only data will end up in
+		 * immediates instead of being placed into memory, expecially
+		 * .sbss2 doesn't make any sense (it should always be zero), but
+		 * it's good to keep them around for compatibility just in case.
+		 * Note that gp-relative addressing will mostly benefit rw small
+		 * data, placed in the data region, and since the data region can
+		 * be very far away since it'll be in ram instead of rom, we can't
+		 * put rw/ro small data close anyway. So we only use gp-relative
+		 * addressing for small rw data only. */
+
+		*(SORT_BY_ALIGNMENT(.srodata.*))	/* This also takes care of
+							 * .srodata.cst16/8/4/2 */
+		*(.srodata)
+		*(.sdata2 .sdata2.* .gnu.linkonce.s2.* .sbss2 .sbss2.* .gnu.linkonce.sb2.*)
+
+		/* Arrays of IRQ sources/targets, defined at linktime (see irq.h) */
+		. = ALIGN(16);
+		__irq_sources_start = .;
+		KEEP(*(.rodata.irq_sources))
+		__irq_sources_end = .;
+
+		. = ALIGN(8);
+		*(.rodata.irq_targets)
+
+		/* This is legacy for secondary rodata */
+		*(.rodata1)
+
+		/* Leave the rest at the end */
+		*(SORT_BY_ALIGNMENT(.rodata.*))
+		*(.rodata .gnu.linkonce.r.*)
+
+		/* Align section's end to word size to ensure .data is properly
+		 * aligned in rom (so that we can copy it word-by-word from rom). */
+		. = ALIGN(8);
+		__rodata_end = .;
+	} > rom :rodata
+	__rodata_start = ABSOLUTE(ADDR(.rodata));
+
+	/* Initialized data loaded from ROM, relocated to RAM (at a word size aligned
+	 * boundary so that we can do a word-by-word copy to ram) */
+	.data	ALIGN(ORIGIN(ram), 8) :
+	{
+		/* The idea here is to keep small data at the end of this section so
+		 * that we can group them together with sbss/scommon in .bss so that
+		 * we can hopefully use gp-relative addressing both for initialized
+		 * and uninitialized small data. To track this section use
+		 * ___gp_relative_start/end variables. */
+
+		*(SORT_BY_ALIGNMENT(.data.*))
+		*(.data .gnu.linkonce.d.*)
+
+		/* Legacy like .rodata1 */
+		*(.data1)
+
+		___gp_relative_start = .;
+		*(SORT_BY_ALIGNMENT(.sdata.*))
+		*(.sdata .gnu.linkonce.s.*)
+
+		/* Align to word size */
+		. = ALIGN(8);
+		___data_end = .;
+
+		/* Since this is a loadable section and will be
+		 * included in the rom image, add something to
+		 * the output section so that in case it doesn't
+		 * have any matches, --gap-fill won't try to fill
+		 * all the way to the next section and generate
+		 * a huge binary for no reason. This also helps
+		 * us to determine where the image ends, and also
+		 * to reserve space for hart lottery / counter when
+		 * multiple harts are supported. */
+		LONG(0xEFBEADDE)
+		LONG(0xEFBEADDE)
+	} > ram AT> rom :data
+	___data_start = ABSOLUTE(ADDR(.data));
+	___data_start_lma = ABSOLUTE(LOADADDR(.data));
+
+	/* Uninitialized data on RAM (aka "Block Started by Symbol")
+	 * Note that although this is mapped to a PT_LOAD segment, it's also
+	 * marked as (NOLOAD) here. This tells the linker to load this section
+	 * into memory (and allow having symbols there), but not load it from
+	 * the binary (since it'd just be full of zeroes anyway). */
+	.bss	ALIGN(8) (NOLOAD) :
+	{
+		/* Note that COMMON/scommon are legacy,
+		 * see -fno-common and more infos here:
+		 * https://gcc.gnu.org/bugzilla/show_bug.cgi?id=85678
+		 * Keep it around to be on the safe side, as with linkonce */
+
+		*(.sbss .sbss.* .scommon .gnu.linkonce.sb.*)
+		___gp_relative_end = .;
+
+		*(.bss .bss.* .gnu.linkonce.b.*)
+		*(COMMON)
+
+		. = ALIGN(8);
+		___bss_end = .;
+	} > ram :bss
+	___bss_start = ABSOLUTE(ADDR(.bss));
+
+	/* Now that we know the layout of .data and .bss, place __global_pointer$
+	 * in the middle of __gp_relative_start/end region that includes initialized
+	 * and uninitialized rw small data, to maximize gp-relative addressing coverage. */
+	PROVIDE(__global_pointer$ = ALIGN(___gp_relative_start +
+					  MIN((___gp_relative_end - ___gp_relative_start) / 2, 0x800),
+					  8));
+
+	/* Make sure .data + .bss are <= 4KB (see policy in the nodes above) */
+	ASSERT((___bss_end - ___data_start) <= 4K, "Global variables larger than 4KB")
+
+
+	/*--== Stack ==--*/
+
+	/* To keep things simple create a non loadable stack section (mapped to NONE segment
+	 * since it's used at runtime, not compile/link time, and also marked as NOLOAD since
+	 * there is nothing to load there from the binary), make sure it fits in ram, do some
+	 * sanity checks on the provided parameters (number of harts and stack size) that may
+	 * get overridden by the platform-specific linker script, and provide some useful symbols
+	 * to use from assembly / C code. */
+	___num_harts = (DEFINED(___num_harts) ? ___num_harts : 1);
+	ASSERT(___num_harts >= 1, "Invalid number of harts")
+
+	___stack_size = (DEFINED(___stack_size) ? ___stack_size : 4K);
+	ASSERT((___stack_size % 16) == 0, "Stack size must be 16-byte aligned")
+	___stack_size_shift = LOG2CEIL(___stack_size);
+	___tot_stack_size = ___stack_size * ___num_harts;
+
+	/* Since it's a non-loadale region we need to do the check manualy */
+	___ram_end = ORIGIN(ram) + LENGTH(ram);
+	ASSERT(___ram_end > (___bss_end + ___tot_stack_size) , "Not enough RAM left for stack")
+
+	.stack ALIGN(16) (NOLOAD) :
+	{
+		. += ___tot_stack_size;
+		. = ALIGN(64);  /* Ensure stack top is 64b aligned so that
+				 * heap is cache-line aligned */
+		___stack_start = .;
+	} > ram :NONE
+
+
+	/*--== Heap ==--*/
+
+	/* Note: There is no heap section, apps can play with .data/.bss for fixed allocations
+	 * at compile time (keep in mind the 4KB restriction for gp-relative addressing in case
+	 * ram is far away from rom), or use __stack_start to __ram_end to do runtime allocations
+	 * (e.g. the simpe bump allocator in yalibc/stdlib.c). */
+
+
+	/*-== Debug sections ==--*/
+
+	/* Debug info sections are not loadable and can be stripped later on (e.g. from the final
+	 * binary) using --strib-debug. */
+
+	/* For more infos on DWARF:
+	 * https://dwarfstd.org/ */
+
+	/* DWARF 1.1 and DWARF 2 */
+	.debug_aranges	0 : { *(.debug_aranges) }
+	.debug_pubnames	0 : { *(.debug_pubnames) }
+	/* DWARF 2 */
+	.debug_info	0 : { *(.debug_info .gnu.linkonce.wi.*) }
+	.debug_abbrev	0 : { *(.debug_abbrev) }
+	.debug_line	0 : { *(.debug_line .debug_line.* .debug_line_end) }
+	.debug_frame	0 : { *(.debug_frame) }
+	.debug_str	0 : { *(.debug_str) }
+	.debug_loc	0 : { *(.debug_loc) }
+	.debug_macinfo	0 : { *(.debug_macinfo) }
+	/* DWARF 3 */
+	.debug_pubtypes	0 : { *(.debug_pubtypes) }
+	.debug_ranges	0 : { *(.debug_ranges) }
+	/* DWARF 5 */
+	.debug_addr	0 : { *(.debug_addr) }
+	.debug_line_str	0 : { *(.debug_line_str) }
+	.debug_loclists	0 : { *(.debug_loclists) }
+	.debug_macro	0 : { *(.debug_macro) }
+	.debug_names	0 : { *(.debug_names) }
+	.debug_rnglists	0 : { *(.debug_rnglists) }
+	.debug_str_offsets 0 : { *(.debug_str_offsets) }
+	.debug_sup	0 : { *(.debug_sup) }
+
+	/* Toolchain-specific build attributes, see:
+	 * https://fedoraproject.org/wiki/Toolchain/Watermark */
+	.gnu.build.attributes 0 : { *(.gnu.build.attributes .gnu.build.attributes.*) }
+
+	/* Target-specific build attributes, specified by RISC-V psABI */
+	.riscv.attributes 0 : { *(.riscv.attributes) }
+
+	/* Needs to be enabled with --build-id */
+	.note.gnu.build-id 0: { *(.note.gnu.build-id) }
+
+
+	/*--== Discarded input sections ==--*/
+
+	/DISCARD/ : {
+		/* Ancient STABS (Symbol Table Strings) debug sections */
+		*(.stab .stabstr .stab.*)
+
+		/* Old DWARF 1 debug sections */
+		*(.debug .line .debug_srcinfo .debug_sfnames)
+
+		/* SGI/MIPS DWARF 2 extensions */
+		*(.debug_weaknames .debug_funcnames .debug_typenames .debug_varnames)
+
+		/* Dynamic linking sections - not needed for bare metal */
+		*(.interp)	/* Interpreter path (the linker in case of shared executables)
+				 * Should be handled by the --no-dynamic-linker option */
+		*(.dynamic .dynstr .dynsym .dynbss .dynsbss)	/* Dynamic linking info */
+		*(.gnu.version*)	/* Symbol versioning */
+		*(.gnu.hash .hash)	/* Hash tables for run-time symbol resolution */
+		*(.stub)
+
+		/* PLT/GOT - for dynamic function calls */
+		*(.plt .plt.* .iplt .got .got.* .igot .igot.*)
+
+		/* Runtime relocations - bare metal is statically linked */
+		*(.rela.*)	/* Catch any other .rela sections */
+		*(.rel.*)	/* Older format relocations */
+
+		/* Read-only relocatable data - for shared libraries */
+		*(.data.rel.ro*)
+
+		/* C++ exception handling - not needed for C */
+		*(.eh_frame* .gcc_except_table* .gnu_extab* .exception_ranges*)
+
+		/* C++ constructors/destructors - not needed for pure C */
+		*(.init_array* .fini_array* .preinit_array* .ctors* .dtors* .init .fini)
+
+		/* Stack unwinding - not needed for bare metal */
+		*(.sframe*)
+
+		/* Thread Local Storage - no threads in bare metal (at least for now) */
+		*(.tdata* .tbss* .tcommon)
+
+		/* Java class registration, that was used as part of the discontinued GCJ,
+		 * I also don't understand why it's in the default risc-v linker script since GCJ was
+		 * deprecated in 2016, it's impossible to have anything compiled with GCJ on risc-v. */
+		*(.jcr)
+
+		/* Misc metadata */
+		*(.gnu_debuglink)	/* Used when debug info lies in a separate file */
+		*(.gnu.lto_*)		/* Used during lto passes, shouldn't see those in the final ELF */
+		*(.comment)		/* Optional - compiler version info */
+		*(.gnu.attributes)	/* Replaced by .riscv.attributes */
+
+		/* GNU notes */
+		*(.note.GNU-stack)
+		*(.note.ABI-tag)
+		*(.note.gnu.property)
+
+		/* Warning sections */
+		*(.gnu.warning*)
+	}
+}
