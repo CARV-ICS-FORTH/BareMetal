@@ -5,7 +5,7 @@ DTB_OPT=""
 TFTP_OPT=""
 
 if [ -n "${TFTPROOT}" ]; then
-	TFTP_OPT=",tftp=${TFTPROOT},bootfile=boot.bin"
+	TFTP_OPT=",tftp=${TFTPROOT},bootfile=boot.img"
 fi
 
 if [ -n "${DTB_PATH}" ]; then

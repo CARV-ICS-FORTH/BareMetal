@@ -29,7 +29,7 @@
 
 /* Use the last RAM_SIZE bytes of DRAM */
 #define	PLAT_SYSRAM_BASE	0x80000000
-#define	PLAT_SYSRAM_SIZE	128 * MB
+#define	PLAT_SYSRAM_SIZE	2 * GB
 
 #define PLAT_ROM_BASE		0x20000000
 #define PLAT_ROM_SIZE		512 * KB

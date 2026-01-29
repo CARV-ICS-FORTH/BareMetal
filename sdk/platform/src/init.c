@@ -23,7 +23,7 @@ void
 platform_init_default(void)
 {
 	uart_init();
-	ANN("BareMetal loader (c) FORTH/CARV 2019\n\r");
+	ANN("BareMetal loader (c) FORTH/CARV 2026\n\r");
 	ANN("------------------------------------\n\r");
 	DBG("Boot hart_id: %li\n", csr_read(CSR_MHARTID));
 

@@ -280,3 +280,4 @@ Some files (`csr.h`, `mmio.h`) are in the public domain.
 ## Contributing
 
 This SDK is developed as part of research at the Institute of Computer Science, Foundation for Research and Technology - Hellas (ICS-FORTH).
+Contributions are welcome. Please ensure code follows the existing style and passes all tests.
