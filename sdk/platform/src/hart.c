@@ -443,7 +443,7 @@ __asm__(
 	".size hart_trap_vector_table, . - hart_trap_vector_table\n"
 );
 #else
-void __direct_trap_handler
+void __direct_trap_handler __attribute__((optimize("O2")))
 hart_direct_trap_handler(void)
 {
 	uint64_t mcause = csr_read(CSR_MCAUSE);

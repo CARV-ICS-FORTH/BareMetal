@@ -13,7 +13,7 @@ OBJCOPY = $(CROSS_PREFIX)objcopy
 AOPS = -march=rv64gc -mabi=lp64d -mcmodel=medany
 
 # Compiler options
-COPS = -Wall -O2 -static -nostdlib -nostdinc -nostartfiles -ffreestanding -mstrict-align
+COPS = -Wall -Os -static -nostdlib -nostdinc -nostartfiles -ffreestanding -mstrict-align
 
 # GCC include directory
 GCC_INCLUDE = $(shell $(CC) -print-file-name=include)
