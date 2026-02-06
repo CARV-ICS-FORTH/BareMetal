@@ -6,7 +6,8 @@
  *
  * SPDX-License-Identifier: Apache-2.0
  */
-
+#ifndef _ASSERT_H
+#define _ASSERT_H
 #include <features.h>
 
 #define __STDC_VERSION_ASSERT_H__ 202311L
@@ -37,11 +38,10 @@
 
 /* Standard-compliant assert macro
  * The standard requires: print to stderr, then call abort()
- * Format: "Assertion failed: expression, function func, file file, line nnn."
- * Uses comma operator: (printf(...), abort()) executes both sequentially.
  */
-#define assert(expr) ((void)((expr) || (printf("Assertion failed: %s, function %s, file %s, line %d.\n", \
-						#expr, __func__, __FILE__, __LINE__), abort())))
+#define assert(expr)	((expr) ? (void)0 : \
+			(printf("Assertion failed: %s, function %s, file %s, line %d.\n", \
+				  #expr, __func__, __FILE__, __LINE__), abort()))
 #endif /* NDEBUG */
 
 /* static_assert macro for C11/C17
@@ -50,3 +50,4 @@
 #if __STDC_VERSION__ >= 201112L && __STDC_VERSION__ < 202311L && !defined(__cplusplus)
 #define static_assert _Static_assert
 #endif
+#endif /* _ASSERT_H */
