@@ -22,6 +22,13 @@
 #define _POSIX_C_SOURCE 200809L
 #endif
 
+/* Compatibility with non-clang compilers
+ * https://clang.llvm.org/docs/LanguageExtensions.html#has-feature-and-has-extension
+ */
+#ifndef __has_feature
+#define __has_feature(x) 0
+#endif
+
 /* Nullability qualifiers: currently only supported by Clang.
  * For GCC and other compilers, these are defined as empty. */
 #if !(defined(__clang__) && __has_feature(nullability))

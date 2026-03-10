@@ -72,7 +72,7 @@ platform_init_default(void)
 		INF("Got %i secondary harts out of %i maximum\n", current_count, PLAT_MAX_HARTS);
 	#endif
 
-	#if defined(DEBUG)
+	#if defined(DEBUG) && !defined(PLAT_NO_IRQ)
 		/* Platform interrupt controller mapping */
 		extern const volatile struct irq_target_mapping platform_intc_map[PLAT_MAX_HARTS];
 

@@ -371,7 +371,7 @@ hart_exception_handler(void) {
 __asm__(
 	".section .text.tvec_table, \"ax\", @progbits\n"
 	".align 3\n"
-	".local hart_trap_vector_table\n" 
+	".local hart_trap_vector_table\n"
 	".type hart_trap_vector_table, @object\n"
 	"hart_trap_vector_table:\n"
 
@@ -506,7 +506,7 @@ hart_configure_imsic_eiid(uint16_t hart_idx, uint16_t eiid, bool enable)
 }
 
 void
-hart_wakeup_with_addr(uint16_t hart_idx, uintptr_t jump_addr, uint64_t arg0, 
+hart_wakeup_with_addr(uint16_t hart_idx, uintptr_t jump_addr, uint64_t arg0,
 		      uint64_t arg1, uint64_t mtimer_cycles)
 {
 	static struct next_params params = {0};
@@ -588,6 +588,7 @@ hart_init(void)
 		hart_set_imsic_eiid_status(hs, PLAT_IMSIC_IPI_EIID, 1);
 	#endif
 
+	#if !defined(PLAT_NO_IRQ)
 	/* For each hart we have the following infos:
 	 * a) hart_id from mhartid, an XLEN id that can be anything as long as it's unique in the system, a physical hart id
 	 * b) hart_idx, an index we assigned to this hart based on the order it came up, it's the logical hart id under our control
@@ -597,7 +598,7 @@ hart_init(void)
 	 * if needed per interrupt source) and is called interrupt domain context (IDC). For IMSIC this describes X, Y is encoded in
 	 * IMSIC's base address (the Y mode's interrupt file), and it's called hart index.
 	 *
-	 * In struct irq_target_mapping (irq.h)  we have a mapping between hart_id and that interrupt target id (that has a different name
+	 * In struct irq_target_mapping (irq.h) we have a mapping between hart_id and that interrupt target id (that has a different name
 	 * depending on the interrupt controller but we use a union so it doesn't matter which one we choose), and we use hs->irq_map_idx
 	 * so that we don't loop over the platform_intc_map all the time to get it.
 	 */
@@ -618,9 +619,10 @@ hart_init(void)
 			hs->irq_map_idx = -1;
 		}
 	#endif
-	
+
 	DBG("HART %i UP: hart_id (from mhartid): %li, ipi_mask 0x%x, flags: 0x%x, irq_map_idx: %i, mstatus: %lx, mtvec: %lx\n",
 	    hs->hart_idx, hs->hart_id, hart_clear_ipi_mask(hs), hart_get_flags(hs), hs->irq_map_idx, csr_read(CSR_MSTATUS), csr_read(CSR_MTVEC));
+	#endif
 
 	/* Trigger a re-seeding of rng state so that
 	 * the timing/order of hart registration influences
