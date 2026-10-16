@@ -19,7 +19,7 @@ SDK_CFLAGS = $(CFLAGS) -DDEBUG
 YALIBC_SOURCES = $(wildcard yalibc/src/*.c)
 PLATFORM_C_SOURCES = $(wildcard platform/src/*.c)
 PLATFORM_S_SOURCES = $(wildcard platform/src/*.S)
-TESTSUITE_SOURCES = $(wildcard testsuite/*.c testsuite/yalibc/*.c testsuite/platform/*.c)
+TESTSUITE_SOURCES = $(wildcard testsuite/*.c testsuite/yalibc/*.c testsuite/platform/*.c testsuite/hart/*.c)
 
 # Object directories for testsuite
 TESTSUITE_OBJ_DIR = $(OBJ_DIR)/testsuite
@@ -148,6 +148,11 @@ $$(TESTSUITE_OBJ_DIR)/%.$(1).o: testsuite/yalibc/%.c | $$(TESTSUITE_OBJ_DIR) $$(
 $$(TESTSUITE_OBJ_DIR)/%.$(1).o: testsuite/platform/%.c | $$(TESTSUITE_OBJ_DIR) $$(BUILD_DIR)
 	$$(MSG) "  [CC]   $$@"
 	$$(Q)$$(CC) $$(SDK_CFLAGS) -I $$(SDK_TARGETS_DIR)/$(1) -I testsuite/include -DDEBUG -c $$< -o $$@
+
+$$(TESTSUITE_OBJ_DIR)/%.$(1).o: testsuite/hart/%.c | $$(TESTSUITE_OBJ_DIR) $$(BUILD_DIR)
+	$$(MSG) "  [CC]   $$@"
+	$$(Q)$$(CC) $$(SDK_CFLAGS) -I $$(SDK_TARGETS_DIR)/$(1) -I testsuite/include -DDEBUG -c $$< -o $$@
+
 endef
 
 # Define a function to create build rules for each target

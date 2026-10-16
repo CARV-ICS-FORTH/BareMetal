@@ -23,6 +23,7 @@ print_category_menu(void)
 	INF("Select test category:\n");
 	INF("\t1 -> YaLibC tests\n");
 	INF("\t2 -> Platform tests\n");
+	INF("\t3 -> Hart test\n");
 }
 
 static void
@@ -103,6 +104,14 @@ main(void)
 					__start_rodata_tests_platform,
 					__stop_rodata_tests_platform,
 					"Platform Tests"
+				);
+				INF("\nTotal failures across all tests: %i\n", total_failures);
+				break;
+			case '3':
+				total_failures += run_test_category(
+					__start_rodata_tests_hart,
+					__stop_rodata_tests_hart,
+					"Hart Test"
 				);
 				INF("\nTotal failures across all tests: %i\n", total_failures);
 				break;

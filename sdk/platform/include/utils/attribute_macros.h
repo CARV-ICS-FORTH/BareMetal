@@ -23,13 +23,24 @@
  * trap handlers that applications can override. Since trap handlers are not
  * called from other functions, we need to declare them as used otherwise LTO
  * and / or --gc-sections may throw them away.
+ *
+ * 
+ * Vectored trap handlers and the direct trap handler are deliberately NOT
+ * static. The trap vector table (hart_trap_vector_table in hart.c) is
+ * file-scope asm that refers to them by symbol name, which the compiler does
+ * not see as a reference. With LTO, a static function may be renamed or placed
+ * in a different partition than that asm, leaving the name undefined at link
+ * time ("undefined reference to hart_exception_handler"). Keeping them global
+ * guarantees the names exist, and "used" still keeps them from being discarded.
+ * Do not add static back without checking an LTO build of the testsuite.
  */
+ 
 #define __weak_handler	__attribute__((weak))
 #if (PLAT_HART_VECTORED_TRAPS == 1)
-	#define __trap_handler	static __attribute__((used, interrupt("machine"), optimize("align-functions=8"), section(".text.trap_handlers")))
+	#define __trap_handler __attribute__((used, interrupt("machine"), optimize("align-functions=8"), section(".text.trap_handlers")))
 #else
 	#define __trap_handler	static inline
-	#define __direct_trap_handler static __attribute__((used, interrupt("machine"), optimize("align-functions=8")))
+	#define __direct_trap_handler __attribute__((used, interrupt("machine"), optimize("align-functions=8")))
 #endif
 #define __empty_trap_handler	__trap_handler __attribute__((alias("hart_default_trap_handler")))
 

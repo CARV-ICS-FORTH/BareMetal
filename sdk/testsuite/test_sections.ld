@@ -30,4 +30,11 @@ SECTIONS
 		. = ALIGN(16);
 		__stop_rodata_tests_platform = .;
 	} > rom :rodata
+
+	.tests_hart : {
+		__start_rodata_tests_hart = .;
+		KEEP(*(__tests_hart))
+		. = ALIGN(16);
+		__stop_rodata_tests_hart = .;
+	} > rom :rodata
 }

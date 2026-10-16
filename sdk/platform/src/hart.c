@@ -446,6 +446,12 @@ hart_exception_handler(void) {
 				hs->error = ENOSYS;
 				goto skip;
 			}
+			/* Check if we are checking for z extensions */
+			if (hart_test_flags(hs, HS_FLAG_PROBING)) {
+				DBG("Probing: ignored illegal instruction: %#.8x\n", ill_inst);
+				hs->error = ENOSYS;
+				goto skip;
+			}
 			ERR("Illegal instruction at 0x%lx, mtval: 0x%lx\n", mepc, mtval);
 			break;
 		case CAUSE_INST_ACCESS_FAULT:
@@ -516,7 +522,7 @@ hart_exception_handler(void) {
 __asm__(
 	".section .text.tvec_table, \"ax\", @progbits\n"
 	".align 3\n"
-	".local hart_trap_vector_table\n" 
+	".globl hart_trap_vector_table\n" 
 	".type hart_trap_vector_table, @object\n"
 	"hart_trap_vector_table:\n"
 
