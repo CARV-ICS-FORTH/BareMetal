@@ -686,6 +686,8 @@ hart_probe_priv_caps(struct rvcaps *caps)
 	hart_probe_zicfiss(hs);
 	hart_probe_zkr(hs);
 
+	hart_probe_unpriv_caps(hs);
+
 	if (misa & CSR_MISA_U) {
 		hart_probe_ube(hs);
 		hart_probe_zicntr(hs);
