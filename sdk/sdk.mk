@@ -17,7 +17,7 @@ SDK_CFLAGS = $(CFLAGS) -DDEBUG
 
 # Source files
 YALIBC_SOURCES = $(wildcard yalibc/src/*.c)
-PLATFORM_C_SOURCES = $(wildcard platform/src/*.c)
+PLATFORM_C_SOURCES = $(wildcard platform/src/*.c platform/src/z_ext/*.c)
 PLATFORM_S_SOURCES = $(wildcard platform/src/*.S)
 TESTSUITE_SOURCES = $(wildcard testsuite/*.c testsuite/yalibc/*.c testsuite/platform/*.c)
 
@@ -29,7 +29,7 @@ YALIBC_OBJS = $(patsubst yalibc/src/%.c,$(YALIBC_OBJ_DIR)/%.o,$(YALIBC_SOURCES))
 
 # Generate per-target object lists
 define PLATFORM_OBJS
-PLATFORM_C_OBJS_$(1) = $$(patsubst platform/src/%.c,$$(PLATFORM_OBJ_DIR)/%.$(1).o,$$(PLATFORM_C_SOURCES))
+PLATFORM_C_OBJS_$(1) = $$(patsubst %.c,$$(PLATFORM_OBJ_DIR)/%.$(1).o,$$(notdir $$(PLATFORM_C_SOURCES)))
 PLATFORM_S_OBJS_$(1) = $$(patsubst platform/src/%.S,$$(PLATFORM_OBJ_DIR)/%.$(1).S.o,$$(PLATFORM_S_SOURCES))
 # Optional target-specific sources (e.g. a platform_init() override). Any .c
 # under targets/<target>/ is compiled into that target's platform library.
@@ -158,6 +158,11 @@ endef
 define TARGET_RULES
 # Build platform C objects for $(1)
 $$(PLATFORM_OBJ_DIR)/%.$(1).o: platform/src/%.c | $$(PLATFORM_OBJ_DIR) $$(BUILD_DIR)
+	$$(MSG) "  [CC]   $$@"
+	$$(Q)$$(CC) $$(SDK_CFLAGS) -I $$(SDK_TARGETS_DIR)/$(1) -c $$< -o $$@
+
+# Build unprivileged extension probes for $(1) (platform/src/z_ext/*.c)
+$$(PLATFORM_OBJ_DIR)/%.$(1).o: platform/src/z_ext/%.c | $$(PLATFORM_OBJ_DIR) $$(BUILD_DIR)
 	$$(MSG) "  [CC]   $$@"
 	$$(Q)$$(CC) $$(SDK_CFLAGS) -I $$(SDK_TARGETS_DIR)/$(1) -c $$< -o $$@
 

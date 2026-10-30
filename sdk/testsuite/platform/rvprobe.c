@@ -91,7 +91,15 @@ static const struct cap_to_str_64 z_cap_names[] = {
 	{CAP_ZICFISS, "Zicfiss (shadow stack)"},
 	{CAP_ZICBOM, "Zicbom (cache block management)"},
 	{CAP_ZICBOZ, "Zicboz (cache block zero)"},
-	{CAP_ZKR, "Zkr (entropy source)"}
+	{CAP_ZKR, "Zkr (entropy source)"},
+	{CAP_ZBA, "Zba (address generation)"},
+	{CAP_ZBB, "Zbb (basic bit manipulation)"},
+	{CAP_ZBC, "Zbc (carry-less multiply)"},
+	{CAP_ZBS, "Zbs (single-bit ops)"},
+	{CAP_ZBKB, "Zbkb (bitmanip for crypto)"},
+	{CAP_ZBKC, "Zbkc (carry-less multiply for crypto)"},
+	{CAP_ZBKX, "Zbkx (crossbar permutations)"}
+
 };
 
 static void
@@ -181,6 +189,9 @@ print_caps(void)
 
 	/* Probe all capabilities */
 	hart_probe_priv_caps(&caps);
+
+	/* Probe all unprivileged capabilities */
+	hart_probe_unpriv_caps(&caps);
 
 	/* Print results organized by category */
 	ANN("\n---=== Detected Capabilities ===---\n");

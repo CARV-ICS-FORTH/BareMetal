@@ -75,10 +75,11 @@ struct hart_state {
 } __attribute__((aligned(8)));
 
 enum state_flags {
-	HS_FLAG_READY		= BIT(0),
-	HS_FLAG_RUNNING		= BIT(1),
-	HS_FLAG_SLEEPING	= BIT(2),
-	HS_FLAG_CAPS_IS_PTR	= BIT(3)
+	HS_FLAG_READY			= BIT(0),
+	HS_FLAG_RUNNING			= BIT(1),
+	HS_FLAG_SLEEPING		= BIT(2),
+	HS_FLAG_CAPS_IS_PTR		= BIT(3),
+	HS_FLAG_PROBING_UNPRIV 	= BIT(4)
 };
 
 /* Static assert to ensure size */
@@ -296,6 +297,9 @@ int hart_va_map_range(uintptr_t phys_addr, size_t *size, uint64_t mode, bool nap
 
 /* Hart probing facility in hart_probe.c */
 void hart_probe_priv_caps(struct rvcaps *caps);
+
+/* Unprivileged extension probing in hart_probe_unpriv.c */
+void hart_probe_unpriv_caps(struct rvcaps *caps);
 
 /* Entry points on hart.c */
 void hart_init(void);

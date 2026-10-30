@@ -65,6 +65,16 @@
 #define CAP_ZKR		BIT_ULL(4)
 
 /*
+ * Unprivileged Caps / exts 
+ */
+#define CAP_ZBA		BIT_ULL(5)		 /* Zba (part of B) */
+#define CAP_ZBB		BIT_ULL(6)		 /* Zbb (part of B) */
+#define CAP_ZBC		BIT_ULL(7)		 /* Zbc (carry-less multiply) */
+#define CAP_ZBS		BIT_ULL(8)		 /* Zbs (part of B) */
+#define CAP_ZBKB	BIT_ULL(9)		 /* Zk* -> Scalar crypto */
+#define CAP_ZBKC	BIT_ULL(10)		 /* Zk* -> Scalar crypto */
+#define CAP_ZBKX	BIT_ULL(11)		 /* Zk* -> Scalar crypto */
+/*
  * Capabilities / extensions that don't fit elsewhere
  */
 
@@ -90,7 +100,6 @@
  * Sub-extensions:
  * Zicsr, Zifencei (used to be part of I)
  * Zaamo, Zalrsc (part of A)
- * Zba/b/s (part of B)
  * Zmmul (part of M -M without div, for embedded-)
  *
  * Other extensions:
@@ -99,7 +108,6 @@
  * Zi*nx -> float/double/half-double in x* regs
  * Zk* -> Scalar crypto (already tracking Zkr)
  * - Zkt -> Constant-time guarantees for crypto
- * Zbc, Zbk* -> Bitmanip for crypto
  * Zve* -> Vector for embedded
  * - Zicbop -> cache prefetch hints
  * Zvbb/c -> Bitmanip for vectors (extends V)

@@ -419,6 +419,19 @@ hart_exception_handler(void) {
 
 	switch(mcause) {
 		case CAUSE_INST_ILLEGAL:
+
+			/* While probing for unprivileged extensions an illegal
+			 * instruction is the expected outcome, not an error: the
+			 * probe runs the extension's instructions and we report
+			 * back that they are not implemented. Probe blocks are
+			 * assembled with .option norvc, so every instruction they
+			 * contain is 4 bytes and skipping below is always right. */
+			if (hart_test_flags(hs, HS_FLAG_PROBING_UNPRIV)) {
+				hs->error = ENOSYS;
+				goto skip;
+			}
+
+
 			/* We only handle access to unimplemented SYSTEM instructions
 			 * here and report the rest. */
 
