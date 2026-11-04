@@ -42,14 +42,20 @@ Example
 -------
     ./fip_replace_monitor.py fip.bin bm_testsuite.milkv-duos.bin fip_bm.bin
 
-Keep the original MONITOR_RUNADDR (recommended), or override it to match
-your image's link address with --runaddr 0x80000000.
+By default MONITOR_RUNADDR is set to DEFAULT_MONITOR_RUNADDR below (where our
+image is linked, i.e. PLAT_ROM_BASE). Override with --runaddr if you relink
+the image elsewhere.
 """
 
 import argparse
 import binascii
 import struct
 import sys
+
+# Where the FSBL loads the MONITOR (our bare-metal image) and jumps to it.
+# MUST match PLAT_ROM_BASE in target_config.h: we place our image at the top
+# of DRAM, so this differs from the stock OpenSBI MONITOR_RUNADDR (0x80000000).
+DEFAULT_MONITOR_RUNADDR = 0x9fb80000
 
 IMAGE_ALIGN = 512
 PARAM1_SIZE = 0x1000
@@ -120,8 +126,8 @@ def main():
     ap.add_argument("monitor", help="bare-metal binary to install as MONITOR")
     ap.add_argument("output_fip", help="fip.bin to write")
     ap.add_argument("--runaddr", type=lambda x: int(x, 0), default=None,
-                    help="MONITOR_RUNADDR override (default: keep the one in "
-                         "the input fip, normally 0x80000000)")
+                    help="MONITOR_RUNADDR (default %#x, = PLAT_ROM_BASE)"
+                         % DEFAULT_MONITOR_RUNADDR)
     args = ap.parse_args()
 
     with open(args.input_fip, "rb") as f:
@@ -163,7 +169,7 @@ def main():
         loader_size = u32(fip, loader_loadaddr + LDR_HDR_SIZE)
         loader = extract(fip, loader_loadaddr, loader_size, "LOADER_2ND")
 
-    runaddr = args.runaddr if args.runaddr is not None else old_mon_runaddr
+    runaddr = args.runaddr if args.runaddr is not None else DEFAULT_MONITOR_RUNADDR
 
     # --- Rebuild from param2 onwards, mirroring fiptool's body2 layout:
     #     param2, [DDR_PARAM], [BLCP_2ND], MONITOR, [LOADER_2ND], each
@@ -205,9 +211,9 @@ def main():
     with open(args.output_fip, "wb") as f:
         f.write(out)
 
-    print("MONITOR: %#x -> %#x bytes, runaddr %#x%s"
-          % (old_mon_size, len(pad(new_monitor)), runaddr,
-             " (kept)" if args.runaddr is None else " (overridden)"))
+    print("MONITOR: %#x -> %#x bytes, runaddr %#x -> %#x%s"
+          % (old_mon_size, len(pad(new_monitor)), old_mon_runaddr, runaddr,
+             " (default)" if args.runaddr is None else " (--runaddr)"))
     print("wrote %s (%d bytes)" % (args.output_fip, len(out)))
 
 

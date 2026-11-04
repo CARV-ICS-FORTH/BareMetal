@@ -37,6 +37,14 @@
 #define PLAT_RAM_BASE		(PLAT_SYSRAM_BASE + PLAT_SYSRAM_SIZE - PLAT_RAM_SIZE)
 #define	PLAT_STACK_SIZE		8 * KB
 
+/* Exercise the fixed DMA-window path (the companion qemu/qemu-aplic targets
+ * leave this undefined and fall back to malloc). RAM sits at the very top of
+ * SYSRAM here, so carve the DMA window just below it - still inside SYSRAM and
+ * clear of RAM; platform_checks.h validates that. We spell the 2GB term as
+ * 2ULL * GB here since PLAT_DMA_BASE is used in C, not just the linker script. */
+#define	PLAT_DMA_SIZE		64 * KB
+#define	PLAT_DMA_BASE		(PLAT_SYSRAM_BASE + 2ULL * GB - PLAT_RAM_SIZE - PLAT_DMA_SIZE)
+
 /* Number of PMP entries this hart implements (0 disables PMP support) */
 #define PLAT_PMP_REGIONS	16
 

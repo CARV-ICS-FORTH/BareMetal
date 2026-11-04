@@ -177,5 +177,37 @@
 	#endif
 #endif
 
+/****************\
+* DMA REGION CHECKS *
+\****************/
+
+/* PLAT_DMA_BASE/SIZE optionally carve a fixed DMA descriptor/buffer window out
+ * of DRAM, for devices whose DMA engine can only reach DRAM while the program
+ * RAM lives elsewhere (e.g. boot SRAM). When a target defines it, validate the
+ * window here once, for every driver that uses it: it must be cache-line
+ * aligned, fit inside the DRAM/SYSRAM window and stay clear of the program RAM
+ * region. Per-device checks (does my state fit PLAT_DMA_SIZE, is it within the
+ * device's own DMA address range) belong in the driver. */
+#if defined(PLAT_DMA_BASE)
+	#if !defined(PLAT_DMA_SIZE) || (PLAT_DMA_SIZE == 0)
+		#error "PLAT_DMA_BASE needs a non-zero PLAT_DMA_SIZE"
+	#endif
+	#if !defined(PLAT_SYSRAM_BASE) || !defined(PLAT_SYSRAM_SIZE)
+		#error "PLAT_DMA_BASE needs PLAT_SYSRAM_BASE/SIZE (the DMA-capable DRAM window)"
+	#endif
+	#if (PLAT_DMA_BASE % 64) != 0
+		#error "PLAT_DMA_BASE must be 64-byte (cache-line) aligned"
+	#endif
+	#if (PLAT_DMA_BASE < PLAT_SYSRAM_BASE) || \
+	    ((PLAT_DMA_BASE + PLAT_DMA_SIZE) > (PLAT_SYSRAM_BASE + PLAT_SYSRAM_SIZE))
+		#error "PLAT_DMA region must lie within the DRAM/SYSRAM window"
+	#endif
+	#if defined(PLAT_RAM_BASE) && defined(PLAT_RAM_SIZE) && \
+	    ((PLAT_DMA_BASE) < (PLAT_RAM_BASE + PLAT_RAM_SIZE)) && \
+	    ((PLAT_DMA_BASE + PLAT_DMA_SIZE) > (PLAT_RAM_BASE))
+		#error "PLAT_DMA region must not overlap the program RAM region"
+	#endif
+#endif
+
 #endif /* _PLATFORM_CHECKS_H */
 #endif /* _PLATFORM_H */

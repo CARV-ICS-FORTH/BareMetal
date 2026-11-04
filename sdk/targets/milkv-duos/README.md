@@ -4,9 +4,12 @@ Sophgo **SG2000** / CVITek **CV181x** family. Derived from the board device
 tree `cv181x_milkv_duos_sd.dts`.
 
 We run as the FIP **MONITOR** image (replacing OpenSBI's `fw_dynamic`) on the
-application C906 core, loaded at and executed from the DRAM base
-(`0x80000000`). The second C906 (little core) and the 8051 run their own
-firmware and are not touched by this image.
+application C906 core. Our image (ROM+RAM) sits at the **top** of DRAM
+(`PLAT_ROM_BASE = 0x9fb80000`, ending at the `0x9fe00000` DRAM top, just below
+the little-core `rproc` reserve), leaving the whole bottom of DRAM
+(`0x80000000 .. 0x9fb80000`, ~507 MB, `PLAT_SYSRAM_*`) as a clean window for
+the application (DMA, NetBoot image staging, ...). The second C906 (little
+core) and the 8051 run their own firmware and are not touched by this image.
 
 ## What is wired up
 
@@ -76,7 +79,7 @@ re-spin images quickly from a single reference `fip.bin`.
 
 It keeps the signed param1 header, BLCP, BL2 (FSBL), BLCP_2ND (RTOS) and the
 compressed LOADER_2ND (u-boot) byte-for-byte, and recomputes only the MONITOR
-size/checksum and the param2 layout/checksum. `MONITOR_RUNADDR` is kept from
-the input image (`0x80000000`); override with `--runaddr` if your image links
-elsewhere. Write the resulting `fip_bm.bin` where the original `fip.bin` goes
-(e.g. the FIP partition / offset of the SD card).
+size/checksum and the param2 layout/checksum. `MONITOR_RUNADDR` defaults to
+`0x9fb80000` (= `PLAT_ROM_BASE`, where our image links); override with
+`--runaddr` if you relink elsewhere. Write the resulting `fip_bm.bin` where the
+original `fip.bin` goes (e.g. the FIP partition / offset of the SD card).

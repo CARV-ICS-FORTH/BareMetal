@@ -36,6 +36,18 @@
 #define	PLAT_RAM_SIZE		2 * MB
 #define	PLAT_STACK_SIZE		8 * KB
 
+/* Optional: a fixed window for DMA descriptors/buffers, for any device whose
+ * DMA engine can reach DRAM but not the program RAM above (e.g. when RAM lives
+ * in boot SRAM). Drivers place their DMA state here instead of on the heap.
+ * Leave both undefined to take DMA memory off the heap instead, which is only
+ * valid when the RAM region is itself DMA-reachable. When set, PLAT_DMA_BASE
+ * must be cache-line (64B) aligned and [PLAT_DMA_BASE, +PLAT_DMA_SIZE) must lie
+ * inside the PLAT_SYSRAM_BASE/SIZE DRAM window without overlapping PLAT_RAM;
+ * platform_checks.h enforces all of that. Put it at the top of DRAM so it stays
+ * clear of firmware images loaded from the bottom. */
+//#define PLAT_DMA_SIZE		64 * KB
+//#define PLAT_DMA_BASE		(PLAT_SYSRAM_BASE + PLAT_SYSRAM_SIZE - PLAT_DMA_SIZE)
+
 #if defined(LDSCRIPT)
 ___rom = PLAT_ROM_BASE;
 ___rom_size = PLAT_ROM_SIZE;

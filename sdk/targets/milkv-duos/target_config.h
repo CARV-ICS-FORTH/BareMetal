@@ -48,21 +48,31 @@
 #define MB	KB * 1024
 #define GB	MB * 1024
 
-/* DRAM as described by memory@80000000 (reg = <0x80000000 0x1fe00000>).
- * Marked here so DMA-capable code knows the usable DRAM window. */
-#define	PLAT_SYSRAM_BASE	0x80000000
-#define	PLAT_SYSRAM_SIZE	0x1fe00000	/* 510 MB */
+/* DRAM, from memory@80000000 (reg = <0x80000000 0x1fe00000>). The node ends
+ * right below the rproc reserve (0x9fe00000+, the little C906's firmware), so
+ * this whole window is ours. */
+#define PLAT_DRAM_BASE		0x80000000
+#define PLAT_DRAM_SIZE		0x1fe00000	/* 510 MB */
 
-/* The DTS reserves the first 512KB of DRAM (/memreserve/ 0x80000000
- * 0x80000) for the boot monitor - that is exactly where the fip loads us
- * (MONITOR_RUNADDR = 0x80000000). Keep .text/.rodata/.data(load) inside
- * that reserved window ("rom"), and carve RAM for .data/.bss/stack right
- * after it. */
-#define PLAT_ROM_BASE		0x80000000
 #define PLAT_ROM_SIZE		512 * KB
-#define PLAT_RAM_BASE		(PLAT_ROM_BASE + PLAT_ROM_SIZE)
 #define	PLAT_RAM_SIZE		2 * MB
 #define	PLAT_STACK_SIZE		8 * KB
+
+/* Put our image at the TOP of DRAM as <rom><ram>[DRAM end]: ROM
+ * (.text/.rodata + .data load image) first, then RAM (.data/.bss/stack/heap)
+ * filling the last bytes up to the end of DRAM. This leaves the whole bottom
+ * of DRAM as one clean window for the application (PLAT_SYSRAM_* below). The
+ * FSBL loads the MONITOR (us) at PLAT_ROM_BASE and jumps there, so the fip's
+ * MONITOR_RUNADDR must match it (fip_replace_monitor.py defaults to this). */
+#define PLAT_ROM_BASE		(PLAT_DRAM_BASE + PLAT_DRAM_SIZE - PLAT_RAM_SIZE - PLAT_ROM_SIZE)	/* 0x9fb80000 */
+#define PLAT_RAM_BASE		(PLAT_ROM_BASE + PLAT_ROM_SIZE)					/* 0x9fc00000 */
+
+/* Everything below our image is free for the application: DMA buffers,
+ * NetBoot image staging, etc. (This reclaims the DTS reserved-memory regions
+ * - framebuffer, rpmsg vrings - which only concern the vendor Linux stack we
+ * replace; the live little-core firmware sits above us, outside this node.) */
+#define	PLAT_SYSRAM_BASE	PLAT_DRAM_BASE					/* 0x80000000 */
+#define	PLAT_SYSRAM_SIZE	(PLAT_ROM_BASE - PLAT_DRAM_BASE)		/* ~507 MB */
 
 /* Number of PMP entries this hart implements (0 disables PMP support).
  * The C906 has a PMP, but our image runs from DRAM (not a write-protected
