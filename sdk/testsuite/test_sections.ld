@@ -6,7 +6,7 @@
  * in the same loadable segment (PT_LOAD with :rodata program header).
  *
  * Implementation notes:
- * - Input sections use names (__tests_yalibc, __tests_platform) that
+ * - Input sections use names (__tests_yalibc, __tests_platform, __tests_hart) that
  *   won't match the base script's .rodata.* wildcard, preventing them
  *   from being consumed by the base .rodata output section
  * - Output sections are placed in rom region after .data's LMA
@@ -29,5 +29,12 @@ SECTIONS
 		KEEP(*(__tests_platform))
 		. = ALIGN(16);
 		__stop_rodata_tests_platform = .;
+	} > rom :rodata
+
+	.tests_hart : {
+		__start_rodata_tests_hart = .;
+		KEEP(*(__tests_hart))
+		. = ALIGN(16);
+		__stop_rodata_tests_hart = .;
 	} > rom :rodata
 }

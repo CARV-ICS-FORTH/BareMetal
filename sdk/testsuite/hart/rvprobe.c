@@ -228,4 +228,4 @@ print_caps(void)
 	return 0;
 }
 
-REGISTER_PLATFORM_TEST("Probe and print hart capabilities", print_caps);
+REGISTER_HART_TEST("Probe and print hart capabilities", print_caps);
