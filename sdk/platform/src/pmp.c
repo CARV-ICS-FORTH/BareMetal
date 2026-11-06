@@ -12,6 +12,7 @@
 #include <platform/riscv/pmp.h>		/* For PMP_* and PLAT_HAS_PMP */
 #include <platform/riscv/csr.h>		/* For csr_write()/CSR_PMP* */
 #include <platform/riscv/hart.h>	/* For hart_get_hstate_self() */
+#include <platform/riscv/early_caps.h>	/* For CAP_SMEPMP (early_caps) */
 #include <platform/utils/utils.h>	/* For DBG()/ERR() */
 
 #ifdef PLAT_HAS_PMP
@@ -57,6 +58,16 @@ hart_init_pmp(void)
 	 * report 0 rather than a misleading garbage read, then clear the error. */
 	uint64_t mseccfg = hs->error ? 0 : csr_read(CSR_MSECCFG);
 	hs->error = 0;
+
+	/* Record Smepmp as an early cap, best effort: RLB is an Smepmp-specific
+	 * field, so if it stuck Smepmp is present. A non-sticking RLB is treated as
+	 * absent -- this can miss a present Smepmp if the hart booted with a locked
+	 * rule (RLB can't go 0->1 then) or hardwires RLB to 0. mseccfg merely
+	 * existing is NOT enough (it is shared with Zkr, pointer masking, Zicfilp).
+	 * The test-suite probe trusts this instead of re-checking, since by then our
+	 * own locked rule below would skew the RLB test. */
+	if (mseccfg & CSR_MSECCFG_RLB)
+		hs->early_caps |= CAP_SMEPMP;
 
 	csr_write(CSR_PMPADDR_BASE + 0, PMP_NAPOT_ADDR(base, (uintptr_t)PLAT_RAM_SIZE));
 	csr_write(CSR_PMPCFG_BASE, (uint64_t)(PMP_A_NAPOT | PMP_R | PMP_W | PMP_L));

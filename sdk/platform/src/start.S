@@ -16,7 +16,6 @@
 #endif
 
 #include <platform/riscv/csr.h>
-#include <platform/riscv/caps.h>
 #include <platform/utils/asm_macros.h>
 #include <target_config.h>
 

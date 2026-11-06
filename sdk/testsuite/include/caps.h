@@ -10,24 +10,27 @@
 #ifndef _CAPS_H
 #define _CAPS_H
 
-#include <platform/utils/bitfield.h>
+/* M-mode caps detected for free by early boot (bits [0..3] of m_caps) */
+#include <platform/riscv/early_caps.h>
 
 /*
- * M-mode capabilities / extensions
+ * M-mode capabilities probed by the test suite.
+ *
+ * These continue the m_caps word after the early-boot caps in early_caps.h
+ * (bits [0..3]), so they start at bit 4 and must not collide with those.
  */
-#define CAP_MCOUNTINHIBIT	BIT(0)	/* For pre 1.11 implementations */
-#define CAP_SMDBLTRP	BIT(1)
-#define CAP_MBE		BIT(2)
-#define CAP_SMMPM	BIT(3)
-#define CAP_SMNPM	BIT(4)
-#define CAP_SMSTATEEN	BIT(5)
-#define CAP_SMCSRIND	BIT(6)
-#define CAP_SMEPMP	BIT(7)	/* Best effort check based on mseccfg.RLB */
-#define CAP_SMCNTRPMF	BIT(8)
-#define CAP_SMRNMI	BIT(9)
-#define CAP_SMCTR	BIT(10)
-#define CAP_SDTRIG	BIT(11)
+#define CAP_SMDBLTRP	BIT(4)
+#define CAP_MBE		BIT(5)
+#define CAP_SMMPM	BIT(6)
+#define CAP_SMNPM	BIT(7)
+#define CAP_SMSTATEEN	BIT(8)
+#define CAP_SMCSRIND	BIT(9)
+#define CAP_SMRNMI	BIT(10)
+#define CAP_SMCTR	BIT(11)
 #define CAP_SMAIA	BIT(12)
+/* Not a named ISA extension: the AIA's IMSIC (MSI controller) hardware
+ * component, detected via its M-mode CSR interface (mtopei). */
+#define CAP_IMSIC	BIT(13)
 
 /*
  * S-mode capabilities / extensions
@@ -128,6 +131,8 @@ struct rvcaps {
 	uint32_t r_caps;
 	uint8_t num_hpmcounters;
 	uint8_t num_pmp_rules;
+	uint8_t pmp_granule_shift;	/* log2(granule bytes): 2 => 4-byte (NA4), 0 => no PMP */
+	uint8_t num_triggers;		/* Sdtrig hardware triggers */
 	uint8_t num_asid_bits;
 	uint8_t vlenb_shift;	/* vlenb = 1 << vlenb_shift, range [4-13] */
 	uint64_t z_caps;

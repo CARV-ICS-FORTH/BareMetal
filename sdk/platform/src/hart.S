@@ -16,7 +16,7 @@
 #endif
 
 #include <platform/riscv/csr.h>
-#include <platform/riscv/caps.h>
+#include <platform/riscv/early_caps.h>	/* For M-mode CAP_* bits (early_caps) */
 #include <platform/utils/asm_macros.h>
 #include <target_config.h>
 

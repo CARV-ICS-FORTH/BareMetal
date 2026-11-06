@@ -16,7 +16,6 @@
 #include <stdbool.h>			/* For bool in hart_test_flags() */
 #include <stddef.h>			/* For size_t in hart_va_map_range() */
 #include <platform/riscv/csr.h>		/* For CSRs and csr ops */
-#include <platform/riscv/caps.h>	/* For struct rvcaps */
 
 /*
  * Used for to pass arguments on IPIs
@@ -293,9 +292,6 @@ void hart_init_sdtrig(struct hart_state *hs);
 
 /* VA mapping functions in hart_va.c */
 int hart_va_map_range(uintptr_t phys_addr, size_t *size, uint64_t mode, bool napot);
-
-/* Hart probing facility in hart_probe.c */
-void hart_probe_priv_caps(struct rvcaps *caps);
 
 /* Entry points on hart.c */
 void hart_init(void);

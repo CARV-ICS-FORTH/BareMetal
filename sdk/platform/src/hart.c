@@ -14,7 +14,6 @@
 #include <platform/riscv/hart.h>	/* For hart_state and definitions */
 #include <platform/riscv/mtimer.h>	/* For mtimer_disarm() */
 #include <platform/utils/utils.h>	/* For console output */
-#include <platform/riscv/caps.h>	/* For CAP_* macros */
 #include <platform/interfaces/rng.h>	/* For rng_get_seed() */
 #include <platform/utils/lock.h>	/* For lock_acquire/release() */
 #include <platform/utils/attribute_macros.h>	/* For __trap_handler etc. */

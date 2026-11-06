@@ -7,15 +7,26 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include <platform/riscv/hart.h>	/* For hart_state */
-#include <platform/riscv/caps.h>	/* For CAP_* macros */
-#include <platform/utils/utils.h>	/* For ANN/INF */
-#include <test_framework.h>		/* For test registration macros */
+/*
+ * Presentation layer for the privileged hart probes: capability-name tables, the
+ * section printers, and the per-category menu entries.
+ *
+ * These are probes, not tests (see test_framework.h): each entry just pulls the
+ * (cached) result from priv_get_caps() -- the one-shot probe in hart_priv_caps.c
+ * -- and renders its slice. The split mirrors the rvcaps fields (m_caps, s_caps,
+ * r_caps, z_caps + the counts). "Run all" reuses the single cached probe.
+ */
 
+#include "hart_priv_caps.h"		/* For priv_get_caps(), struct rvcaps, CAP_* */
+#include <platform/utils/utils.h>	/* For ANN()/INF() */
+#include <test_framework.h>		/* For REGISTER_HART_PRIV_PROBE */
+#include <stddef.h>			/* For size_t */
 #include <stdint.h>			/* For typed ints */
+#include <stdbool.h>			/* For bool */
 
-/* Forward declaration */
-void hart_probe_priv_caps(struct rvcaps *caps);
+#ifndef ARRAY_SIZE
+#define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
+#endif
 
 struct cap_to_str {
 	uint32_t cap;
@@ -40,7 +51,8 @@ static const struct cap_to_str m_cap_names[] = {
 	{CAP_SMRNMI, "Smrnmi (resumable NMI)"},
 	{CAP_SMCTR, "Smctr (control transfer records)"},
 	{CAP_SDTRIG, "Sdtrig (debug triggers)"},
-	{CAP_SMAIA, "Smaia (advanced interrupt architecture)"}
+	{CAP_SMAIA, "Smaia (advanced interrupt architecture)"},
+	{CAP_IMSIC, "IMSIC (incoming MSI controller)"}
 };
 
 /* S-mode capabilities */
@@ -172,60 +184,83 @@ print_big_endian_support(struct rvcaps *caps)
 }
 
 static int
-print_caps(void)
+priv_probe_modes(void)
 {
-	struct rvcaps caps = {0};
-
-	ANN("\n---=== Probing RISC-V Capabilities ===---\n");
-	INF("Running capability detection...\n");
-
-	/* Probe all capabilities */
-	hart_probe_priv_caps(&caps);
-
-	/* Print results organized by category */
-	ANN("\n---=== Detected Capabilities ===---\n");
-
-	/* Privilege modes */
-	print_priv_modes(&caps);
-
-	/* Big endian support */
-	print_big_endian_support(&caps);
-
-	/* MISA-derived extensions */
-	print_caps_section("MISA Extensions", caps.r_caps,
-	                   misa_ext_names, sizeof(misa_ext_names) / sizeof(misa_ext_names[0]));
-
-	/* U-mode extensions */
-	print_caps_section("U-mode Extensions", caps.r_caps,
-	                   u_ext_names, sizeof(u_ext_names) / sizeof(u_ext_names[0]));
-
-	/* M-mode capabilities */
-	print_caps_section("M-mode Extensions", caps.m_caps,
-	                   m_cap_names, sizeof(m_cap_names) / sizeof(m_cap_names[0]));
-
-	/* S-mode capabilities */
-	print_caps_section("S-mode Extensions", caps.s_caps,
-	                   s_cap_names, sizeof(s_cap_names) / sizeof(s_cap_names[0]));
-
-	/* Common/Z* capabilities */
-	print_caps_section_64("Common Extensions (Z*)", caps.z_caps,
-	                      z_cap_names, sizeof(z_cap_names) / sizeof(z_cap_names[0]));
-
-	/* Additional info */
-	if (caps.num_hpmcounters > 0)
-		INF("\nHardware Performance Counters: %u\n", caps.num_hpmcounters);
-	if (caps.num_pmp_rules > 0)
-		INF("PMP Rules: %u\n", caps.num_pmp_rules);
-	if (caps.num_asid_bits > 0)
-		INF("ASID bits: %u\n", caps.num_asid_bits);
-	if (caps.vlenb_shift > 0) {
-		uint16_t vlenb = 1 << caps.vlenb_shift;
-		uint16_t vlen = vlenb * 8;
-		INF("Vector Length (VLEN): %u bits (%u bytes)\n", vlen, vlenb);
-	}
-
+	struct rvcaps *caps = priv_get_caps();
+	print_priv_modes(caps);
+	print_big_endian_support(caps);
 	INF("\nPress a key to continue...\n");
 	return 0;
 }
+REGISTER_HART_PRIV_PROBE("Privilege modes & endianness", priv_probe_modes);
 
-REGISTER_PLATFORM_TEST("Probe and print hart capabilities", print_caps);
+static int
+priv_probe_misa(void)
+{
+	struct rvcaps *caps = priv_get_caps();
+	print_caps_section("MISA Extensions", caps->r_caps,
+	                   misa_ext_names, ARRAY_SIZE(misa_ext_names));
+	if (caps->vlenb_shift > 0) {
+		uint16_t vlenb = 1 << caps->vlenb_shift;
+		INF("\nVector Length (VLEN): %u bits (%u bytes)\n", vlenb * 8, vlenb);
+	}
+	INF("\nPress a key to continue...\n");
+	return 0;
+}
+REGISTER_HART_PRIV_PROBE("Base ISA (MISA) extensions", priv_probe_misa);
+
+static int
+priv_probe_m_caps(void)
+{
+	struct rvcaps *caps = priv_get_caps();
+	print_caps_section("M-mode Extensions", caps->m_caps,
+	                   m_cap_names, ARRAY_SIZE(m_cap_names));
+	if (caps->num_pmp_rules > 0) {
+		INF("\nPMP Rules: %u\n", caps->num_pmp_rules);
+		INF("PMP Granularity: %lu bytes%s\n",
+		    1UL << caps->pmp_granule_shift,
+		    caps->pmp_granule_shift == 2 ? " (NA4 supported)" : "");
+	}
+	if (caps->num_triggers > 0)
+		INF("Debug Triggers: %u\n", caps->num_triggers);
+	INF("\nPress a key to continue...\n");
+	return 0;
+}
+REGISTER_HART_PRIV_PROBE("M-mode extensions", priv_probe_m_caps);
+
+static int
+priv_probe_s_caps(void)
+{
+	struct rvcaps *caps = priv_get_caps();
+	print_caps_section("S-mode Extensions", caps->s_caps,
+	                   s_cap_names, ARRAY_SIZE(s_cap_names));
+	if (caps->num_asid_bits > 0)
+		INF("\nASID bits: %u\n", caps->num_asid_bits);
+	INF("\nPress a key to continue...\n");
+	return 0;
+}
+REGISTER_HART_PRIV_PROBE("S-mode extensions", priv_probe_s_caps);
+
+static int
+priv_probe_u_caps(void)
+{
+	struct rvcaps *caps = priv_get_caps();
+	print_caps_section("U-mode Extensions", caps->r_caps,
+	                   u_ext_names, ARRAY_SIZE(u_ext_names));
+	if (caps->num_hpmcounters > 0)
+		INF("\nHardware Performance Counters: %u\n", caps->num_hpmcounters);
+	INF("\nPress a key to continue...\n");
+	return 0;
+}
+REGISTER_HART_PRIV_PROBE("U-mode extensions & counters", priv_probe_u_caps);
+
+static int
+priv_probe_z_caps(void)
+{
+	struct rvcaps *caps = priv_get_caps();
+	print_caps_section_64("Common Extensions (Z*)", caps->z_caps,
+	                      z_cap_names, ARRAY_SIZE(z_cap_names));
+	INF("\nPress a key to continue...\n");
+	return 0;
+}
+REGISTER_HART_PRIV_PROBE("Common (Z*) extensions", priv_probe_z_caps);

@@ -29,7 +29,7 @@ sdk/
 ├── platform/            # Platform abstraction layer
 │   ├── include/
 │   │   ├── interfaces/  # HAL interfaces (uart.h, timer.h, irq.h, ipi.h)
-│   │   ├── riscv/       # RISC-V specific (hart.h, csr.h, mtimer.h, caps.h)
+│   │   ├── riscv/       # RISC-V specific (hart.h, csr.h, mtimer.h, early_caps.h)
 │   │   ├── utils/       # Utilities (locks, bitfields, register macros)
 │   │   └── templates/   # Linker script templates
 │   ├── src/             # Platform implementation
@@ -41,8 +41,10 @@ sdk/
 │   └── qemu-aia/        # QEMU with full AIA (APLIC + IMSIC)
 │
 ├── testsuite/           # Comprehensive test suite
+│   ├── include/         # Test framework + capability defs (caps.h)
 │   ├── yalibc/          # Tests for C library functions
-│   ├── platform/        # Tests for platform features
+│   ├── platform/        # Tests for platform (SoC-level) features
+│   ├── hart/            # Hart-level tests (priv/, unpriv/)
 │   └── main.c           # Interactive test menu
 │
 ├── build.mk             # Common build configuration
@@ -83,7 +85,7 @@ Hardware abstraction and system initialization:
 - **Hart (Hardware Thread) Management**:
   - Multi-hart initialization and control, with support for sparse hart ids.
   - Per-hart state management and TLS (e.g. `errno`)
-  - Capability probing for runtime hardware detection
+  - Early-boot capability detection (`early_caps`); full runtime capability probing lives in the hart-level test suite
 
 - **Interrupt Handling**:
   - SiFive PLIC (Platform-Level Interrupt Controller) support
@@ -181,7 +183,7 @@ make test TARGET=qemu-aplic     # Test with APLIC
 make test TARGET=qemu-aia       # Test with full AIA (APLIC+IMSIC)
 ```
 
-The test suite is interactive - you'll see a menu where you can select test categories (YaLibC or Platform) and individual tests to run.
+The test suite is interactive - you'll see a menu where you can select a test category (Hart, Platform, or YaLibC), then an individual test or a cumulative "run all" summary.
 
 ### Available Targets
 
@@ -247,22 +249,14 @@ that most trap handlers are defined as weak symbols so applications can override
 
 ### Hardware Capability Probing
 
-Detect available hardware features at runtime:
-
-```c
-#include <platform/riscv/caps.h>
-#include <platform/riscv/hart.h>
-
-void main(void) {
-    struct rvcaps caps;
-    hart_probe_priv_caps(&caps);
-
-    if (caps.has_fpu)
-        printf("FPU available\n");
-    if (caps.has_vector)
-        printf("Vector extension available\n");
-}
-```
+Runtime RISC-V capability probing (M/S-mode CSRs, MISA, virtual-memory modes,
+PMP, counters, etc.) is implemented as a hart-level test rather than a platform
+API, since poking at unsupported CSRs relies on the trap handler flagging them.
+See `sdk/testsuite/hart/priv/hart_priv_tests.c` for the probe engine
+(`hart_probe_priv_caps()`, filling a `struct rvcaps` from `testsuite/include/caps.h`)
+and run it via the test suite's "Hart -> Privileged tests" menu. Early-boot code
+detects a small set of M-mode capabilities on its own into `hart_state.early_caps`
+(see `platform/include/riscv/early_caps.h`).
 
 ## License
 
