@@ -8,72 +8,163 @@
  */
 
 /*
- * M-mode privileged capability probing.
- *
- * Detects M-mode extensions by poking at M-mode CSRs (the platform trap handler
- * flags unsupported accesses via hs->error) and counts PMP entries/granularity
- * and Sdtrig triggers. MCOUNTINHIBIT/SMCNTRPMF/SDTRIG/SMEPMP are not probed here:
- * early boot detects them for free into hart_state.early_caps, and the engine
- * seeds m_caps from there (see hart_priv_caps.c).
+ * M-mode privileged units (REGISTER_HART_PRIV_M). Each is a live probe: it pokes an
+ * M-mode CSR (the trap handler flags unsupported accesses via hs->error) and returns
+ * its presence/caps. MCOUNTINHIBIT/SMCNTRPMF/SDTRIG/SMEPMP can't be re-probed after
+ * boot, so those units read the caps early boot stashed in hart_state.early_caps.
  */
 
 #include "hart_priv_caps.h"
 #include <platform/riscv/csr.h>		/* For CSR numbers and ops */
-#include <stdint.h>			/* For typed ints */
-#include <stdbool.h>			/* For bool */
+#include <platform/riscv/early_caps.h>	/* For CAP_* stashed by early boot */
+#include <platform/utils/utils.h>	/* For INF() */
+#include <test_framework.h>		/* For REGISTER_HART_PRIV_M + PROBE_* */
+#include <stdint.h>
 
-static void
-hart_probe_smdbltrp(struct hart_state *hs)
+/* Report a cap early boot already detected into hart_state.early_caps. */
+static int
+early_cap(uint64_t bit)
 {
-	struct rvcaps *caps = hs->caps;
-	/* Check if MDT sticks, note this will clear MIE */
-	hart_probe_cap_by_csr_bit(CSR_MSTATUS, CSR_MSTATUS_MDT, caps->m_caps, CAP_SMDBLTRP);
+	return (hart_get_hstate_self()->early_caps & bit) ? 0 : PROBE_ABSENT;
 }
 
-static void
-hart_probe_mbe(struct hart_state *hs)
+/*
+ * Base ISA (MISA), privilege modes and endianness -- a hart-wide overview. Named to
+ * sort first in the M-mode list ("0misa" < "probe_*"). Always present; its detail
+ * prints under PROBE_INFO.
+ */
+static int
+hart_probe_0misa(unsigned flags)
 {
-	struct rvcaps *caps = hs->caps;
-	hart_probe_cap_by_csr_bit(CSR_MSTATUS, CSR_MSTATUS_MBE, caps->m_caps, CAP_MBE);
+	if (!(flags & PROBE_INFO))
+		return PROBE_INFO;
+
+	uint64_t misa = csr_read(CSR_MISA);
+	uint64_t mstatus = csr_read(CSR_MSTATUS);
+
+	INF("\tMISA:");
+	for (int i = 0; i < 26; i++)
+		if (misa & (1ull << i))
+			INF(" %c", 'A' + i);
+	INF("\n");
+	INF("\tModes: M%s%s\n",
+	    (misa & (1ull << ('S' - 'A'))) ? " S" : "",
+	    (misa & (1ull << ('U' - 'A'))) ? " U" : "");
+	INF("\tM-mode endianness: %s\n",
+	    (mstatus & CSR_MSTATUS_MBE) ? "big" : "little");
+	return 0;
+}
+REGISTER_HART_PRIV_M("Base ISA (MISA), modes & endianness", hart_probe_0misa);
+
+static int
+hart_probe_mcountinhibit(unsigned flags)
+{
+	(void)flags;
+	return early_cap(CAP_MCOUNTINHIBIT);
+}
+REGISTER_HART_PRIV_M("mcountinhibit (counter inhibit)", hart_probe_mcountinhibit);
+
+static int
+hart_probe_smcntrpmf(unsigned flags)
+{
+	(void)flags;
+	return early_cap(CAP_SMCNTRPMF);
+}
+REGISTER_HART_PRIV_M("Smcntrpmf (counter privilege mode filtering)", hart_probe_smcntrpmf);
+
+static int
+hart_probe_smepmp(unsigned flags)
+{
+	(void)flags;
+	return early_cap(CAP_SMEPMP);
+}
+REGISTER_HART_PRIV_M("Smepmp (enhanced PMP)", hart_probe_smepmp);
+
+/* Count Sdtrig triggers: tselect is WARL, so walk indices until a write stops
+ * sticking. Non-destructive (only tselect is touched). */
+static unsigned
+count_triggers(void)
+{
+	unsigned n = 0;
+
+	while (n < 255) {			/* defensive bound; real counts are tiny */
+		csr_write(CSR_TSELECT, n);
+		if (csr_read(CSR_TSELECT) != n)
+			break;
+		n++;
+	}
+	return n;
 }
 
-static void
-hart_probe_smmpm(struct hart_state *hs)
+static int
+hart_probe_sdtrig(unsigned flags)
 {
-	struct rvcaps *caps = hs->caps;
-	hart_probe_cap_by_csr_field(CSR_MSECCFG, CSR_MSECCFG_PMM, 2, caps->m_caps, CAP_SMMPM);
+	if (early_cap(CAP_SDTRIG) < 0)
+		return PROBE_ABSENT;
+	if (flags & PROBE_INFO)
+		INF("\t%u triggers\n", count_triggers());
+	return PROBE_INFO;
 }
+REGISTER_HART_PRIV_M("Sdtrig (debug triggers)", hart_probe_sdtrig);
 
-static void
-hart_probe_smnpm(struct hart_state *hs)
+static int
+hart_probe_smdbltrp(unsigned flags)
 {
-	struct rvcaps *caps = hs->caps;
-	hart_probe_cap_by_csr_field(CSR_MENVCFG, CSR_MENVCFG_PMM, 2, caps->m_caps, CAP_SMNPM);
+	(void)flags;			/* MDT sticking also clears MIE -- harmless here */
+	return hart_probe_csr_bit(CSR_MSTATUS, CSR_MSTATUS_MDT);
 }
+REGISTER_HART_PRIV_M("Smdbltrp (double trap)", hart_probe_smdbltrp);
 
-static void
-hart_probe_smstateen(struct hart_state *hs)
+static int
+hart_probe_smmpm(unsigned flags)
 {
-	struct rvcaps *caps = hs->caps;
-	hart_probe_cap_by_csr_existence(CSR_MSTATEEN0, caps->m_caps, CAP_SMSTATEEN);
+	(void)flags;
+	return hart_probe_csr_field(CSR_MSECCFG, CSR_MSECCFG_PMM, 2);
 }
+REGISTER_HART_PRIV_M("Smmpm (pointer masking)", hart_probe_smmpm);
 
-static void
-hart_probe_smcsrind(struct hart_state *hs)
+static int
+hart_probe_smnpm(unsigned flags)
 {
-	struct rvcaps *caps = hs->caps;
-	hart_probe_cap_by_csr_existence(CSR_MISELECT, caps->m_caps, CAP_SMCSRIND);
+	(void)flags;
+	return hart_probe_csr_field(CSR_MENVCFG, CSR_MENVCFG_PMM, 2);
 }
+REGISTER_HART_PRIV_M("Smnpm (pointer masking next mode)", hart_probe_smnpm);
 
-static void
-hart_probe_smrnmi(struct hart_state *hs)
+static int
+hart_probe_smstateen(unsigned flags)
 {
-	struct rvcaps *caps = hs->caps;
-	hart_probe_cap_by_csr_existence(CSR_MNSCRATCH, caps->m_caps, CAP_SMRNMI);
+	(void)flags;
+	return hart_probe_csr_exists(CSR_MSTATEEN0);
 }
+REGISTER_HART_PRIV_M("Smstateen (state enable)", hart_probe_smstateen);
 
-/* Macros to probe PMP registers at compile time */
-#define __check_pmp_csr(__n, __pmp_count, __hs, __testval)		\
+static int
+hart_probe_smcsrind(unsigned flags)
+{
+	(void)flags;
+	return hart_probe_csr_exists(CSR_MISELECT);
+}
+REGISTER_HART_PRIV_M("Smcsrind (indirect CSR access)", hart_probe_smcsrind);
+
+static int
+hart_probe_smrnmi(unsigned flags)
+{
+	(void)flags;
+	return hart_probe_csr_exists(CSR_MNSCRATCH);
+}
+REGISTER_HART_PRIV_M("Smrnmi (resumable NMI)", hart_probe_smrnmi);
+
+static int
+hart_probe_smctr(unsigned flags)
+{
+	(void)flags;
+	return hart_probe_csr_exists(CSR_MCTRCTL);
+}
+REGISTER_HART_PRIV_M("Smctr (control transfer records)", hart_probe_smctr);
+
+/* Macros to probe the 64 possible PMP regions at compile time (constant CSR #). */
+#define __check_pmp_csr(__n, __count, __hs, __testval)			\
 do {									\
 	__hs->error = 0;						\
 	uint64_t __orig = csr_read(CSR_PMPADDR_BASE + __n);		\
@@ -83,146 +174,75 @@ do {									\
 	uint64_t __test = csr_read(CSR_PMPADDR_BASE + __n);		\
 	csr_write(CSR_PMPADDR_BASE + __n, __orig);			\
 	if (__test != 0)						\
-		__pmp_count = __n + 1;					\
+		__count = __n + 1;					\
 	else								\
 		goto __pmp_done;					\
 } while (0)
 
-#define __check_pmp_csr_2(__base, __pmp_count, __hs, __testval)	\
-	__check_pmp_csr(__base + 0, __pmp_count, __hs, __testval);	\
-	__check_pmp_csr(__base + 1, __pmp_count, __hs, __testval)
+#define __check_pmp_csr_2(__b, __c, __h, __t)	__check_pmp_csr(__b + 0, __c, __h, __t); __check_pmp_csr(__b + 1, __c, __h, __t)
+#define __check_pmp_csr_4(__b, __c, __h, __t)	__check_pmp_csr_2(__b + 0, __c, __h, __t); __check_pmp_csr_2(__b + 2, __c, __h, __t)
+#define __check_pmp_csr_8(__b, __c, __h, __t)	__check_pmp_csr_4(__b + 0, __c, __h, __t); __check_pmp_csr_4(__b + 4, __c, __h, __t)
+#define __check_pmp_csr_16(__b, __c, __h, __t)	__check_pmp_csr_8(__b + 0, __c, __h, __t); __check_pmp_csr_8(__b + 8, __c, __h, __t)
+#define __check_pmp_csr_32(__b, __c, __h, __t)	__check_pmp_csr_16(__b + 0, __c, __h, __t); __check_pmp_csr_16(__b + 16, __c, __h, __t)
+#define __check_pmp_csr_64(__c, __h, __t)	__check_pmp_csr_32(0, __c, __h, __t); __check_pmp_csr_32(32, __c, __h, __t)
 
-#define __check_pmp_csr_4(__base, __pmp_count, __hs, __testval)	\
-	__check_pmp_csr_2(__base + 0, __pmp_count, __hs, __testval);	\
-	__check_pmp_csr_2(__base + 2, __pmp_count, __hs, __testval)
-
-#define __check_pmp_csr_8(__base, __pmp_count, __hs, __testval)	\
-	__check_pmp_csr_4(__base + 0, __pmp_count, __hs, __testval);	\
-	__check_pmp_csr_4(__base + 4, __pmp_count, __hs, __testval)
-
-#define __check_pmp_csr_16(__base, __pmp_count, __hs, __testval)	\
-	__check_pmp_csr_8(__base + 0, __pmp_count, __hs, __testval);	\
-	__check_pmp_csr_8(__base + 8, __pmp_count, __hs, __testval)
-
-#define __check_pmp_csr_32(__base, __pmp_count, __hs, __testval)	\
-	__check_pmp_csr_16(__base + 0, __pmp_count, __hs, __testval);	\
-	__check_pmp_csr_16(__base + 16, __pmp_count, __hs, __testval)
-
-#define __check_pmp_csr_64(__pmp_count, __hs, __testval)		\
-	__check_pmp_csr_32(0, __pmp_count, __hs, __testval);		\
-	__check_pmp_csr_32(32, __pmp_count, __hs, __testval)
-
-/* Probe for PMP support and count number of regions */
-static void
-hart_probe_pmp(struct hart_state *hs)
+/* Detect PMP and count regions + granule. Returns true if present. */
+static bool
+pmp_detect(uint8_t *num, uint8_t *granule_shift)
 {
-	struct rvcaps *caps = hs->caps;
-	uint8_t num_pmp = 0;
+	struct hart_state *hs = hart_get_hstate_self();
+	uint8_t count = 0, g = 0;
 
-	/* First check if PMP is supported by trying to access PMPCFG0 and PMPADDR0 */
 	hs->error = 0;
 	csr_write(CSR_PMPCFG_BASE, 0);
-	if (hs->error != 0) {
-		caps->num_pmp_rules = 0;
-		return;
-	}
+	if (hs->error != 0)
+		return false;
 
-	/* Try writing to PMPADDR0 to determine which address bits are supported */
 	csr_write(CSR_PMPADDR_BASE, 0xFFFFFFFFFFFFFFFFULL);
 	uint64_t testval = csr_read(CSR_PMPADDR_BASE);
 	csr_write(CSR_PMPADDR_BASE, 0);
+	if (testval == 0)
+		return false;
 
-	if (testval == 0) {
-		caps->num_pmp_rules = 0;
-		return;
-	}
-
-	/* PMP granularity (priv. spec 3.7): with pmpcfg0=0 (set above), the all-ones
-	 * write to pmpaddr0 reads back with its least-significant set bit at index G,
-	 * and the granularity is 2^(G+2) bytes. G==0 (4-byte granule) means NA4 is
-	 * supported. We reuse 'testval' read-only here, so the count below is
-	 * unaffected. (TODO: use ctz if compiled with Zbb.) */
-	uint8_t g = 0;
+	/* Granularity (priv spec 3.7): lowest set bit of the all-ones readback is G,
+	 * granule is 2^(G+2) bytes (G==0 => 4-byte, NA4 supported). */
 	while (!((testval >> g) & 1))
 		g++;
-	caps->pmp_granule_shift = g + 2;
+	*granule_shift = g + 2;
 
-	/* Use compile-time macro expansion to probe all 64 possible PMP regions */
-	__check_pmp_csr_64(num_pmp, hs, testval);
-
+	__check_pmp_csr_64(count, hs, testval);
 __pmp_done:
-	caps->num_pmp_rules = num_pmp;
-
-	/* Smepmp (CAP_SMEPMP) is detected for free during hart_init_pmp() and
-	 * arrives via early_caps (already copied into m_caps). We don't re-check
-	 * mseccfg.RLB here: by now our own locked PMP rule is installed, so RLB
-	 * can't go 0->1 and the test would yield a false negative. */
+	*num = count;
+	return true;
 }
 
-static void
-hart_probe_smctr(struct hart_state *hs)
+static int
+hart_probe_pmp(unsigned flags)
 {
-	struct rvcaps *caps = hs->caps;
-	hart_probe_cap_by_csr_existence(CSR_MCTRCTL, caps->m_caps, CAP_SMCTR);
-}
+	uint8_t num, granule_shift;
 
-static void
-hart_probe_smaia(struct hart_state *hs)
+	if (!pmp_detect(&num, &granule_shift))
+		return PROBE_ABSENT;
+	if (flags & PROBE_INFO)
+		INF("\t%u regions, %lu-byte granule\n", num, 1ul << granule_shift);
+	return PROBE_INFO;
+}
+REGISTER_HART_PRIV_M("PMP (physical memory protection)", hart_probe_pmp);
+
+/* Probe mtopi (AIA core), present with a wired APLIC even without an IMSIC. */
+static int
+hart_probe_smaia(unsigned flags)
 {
-	struct rvcaps *caps = hs->caps;
-	/* Probe mtopi (AIA-core), not mtopei (IMSIC-only), so Smaia is detected on
-	 * harts with a wired APLIC but no IMSIC too. */
-	hart_probe_cap_by_csr_existence(CSR_MTOPI, caps->m_caps, CAP_SMAIA);
+	(void)flags;
+	return hart_probe_csr_exists(CSR_MTOPI);
 }
+REGISTER_HART_PRIV_M("Smaia (advanced interrupt architecture)", hart_probe_smaia);
 
-/* IMSIC is not a separate ISA extension -- it's the AIA's MSI-controller
- * hardware component. Its presence shows up as the IMSIC CSR interface (mtopei,
- * the M-mode interrupt file), which exists only when an IMSIC is present,
- * whereas mtopi (Smaia, above) exists regardless. So this is a distinct,
- * finer-grained capability. */
-static void
-hart_probe_imsic(struct hart_state *hs)
+/* mtopei (the M-mode interrupt file) exists only when an IMSIC is present. */
+static int
+hart_probe_imsic(unsigned flags)
 {
-	struct rvcaps *caps = hs->caps;
-	hart_probe_cap_by_csr_existence(CSR_MTOPEI, caps->m_caps, CAP_IMSIC);
+	(void)flags;
+	return hart_probe_csr_exists(CSR_MTOPEI);
 }
-
-/* Count Sdtrig hardware triggers. tselect is WARL: writing an out-of-range index
- * reads back a different value, so walk indices until the write stops sticking.
- * Non-destructive -- only tselect is touched, never the trigger data CSRs. The
- * Sdtrig cap itself comes from early_caps (hart_init_sdtrig); we only quantify
- * it here, alongside the other "how many" probes (PMP entries, HPM counters). */
-static void
-hart_count_triggers(struct hart_state *hs)
-{
-	struct rvcaps *caps = hs->caps;
-
-	if (!(caps->m_caps & CAP_SDTRIG))
-		return;
-
-	uint32_t count = 0;
-	while (count < 255) {		/* defensive bound; real counts are tiny */
-		csr_write(CSR_TSELECT, count);
-		if (csr_read(CSR_TSELECT) != count)
-			break;
-		count++;
-	}
-	caps->num_triggers = (uint8_t)count;
-}
-
-void
-hart_probe_mmode(struct hart_state *hs)
-{
-	hart_probe_smdbltrp(hs);
-	hart_probe_mbe(hs);
-	hart_probe_smmpm(hs);
-	hart_probe_smnpm(hs);
-	hart_probe_smstateen(hs);
-	hart_probe_smcsrind(hs);
-	hart_probe_smrnmi(hs);
-	hart_probe_smctr(hs);
-	hart_probe_pmp(hs);
-	hart_probe_smaia(hs);
-	hart_probe_imsic(hs);
-	hart_count_triggers(hs);
-}
+REGISTER_HART_PRIV_M("IMSIC (incoming MSI controller)", hart_probe_imsic);

@@ -16,8 +16,11 @@
 #define TESTBUFF_LEN 2048
 
 static int
-test_string_compare(void)
+test_string_compare(unsigned flags)
 {
+	if (!flags)		/* probe: present, run on demand */
+		return PROBE_INTERACTIVE;
+
 	int failures = 0;
 	int ret = 0;
 
@@ -468,7 +471,7 @@ test_string_compare(void)
 	INF("=== String Compare Test Results: %s (%d failures) ===\n",
 	    failures == 0 ? "PASS" : "FAIL", failures);
 
-	return failures;
+	return failures ? PROBE_FAILED : 0;
 }
 
-REGISTER_YALIBC_TEST("String compare tests", test_string_compare);
+REGISTER_YALIBC("String compare tests", test_string_compare);

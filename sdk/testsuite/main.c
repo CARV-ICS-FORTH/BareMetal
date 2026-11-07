@@ -7,175 +7,209 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include <test_framework.h>		/* For test registration */
+#include <test_framework.h>		/* For unit registration + run_group_menu() */
 #include <platform/utils/utils.h>	/* For console output */
 #include <platform/riscv/hart.h>	/* For hart_get_hstate_self() */
 #include <platform/riscv/csr.h>		/* For pause() */
 #include <stddef.h>			/* For size_t */
+#include <stdint.h>			/* For uint64_t */
 #include <stdio.h>			/* For getchar(), EOF */
 
-/*
- * A group is one array of entries (one linker section). An entry is a probe
- * (detect & report, no verdict) or a test (asserts, pass/fail) -- see
- * test_framework.h. A category groups one or more related groups together;
- * categories with a single group skip straight to their list, while multi-group
- * categories (e.g. Hart -> priv/unpriv) show a sub-menu. Every list offers
- * running an individual entry or a cumulative run-all summary.
- */
-struct test_group {
-	const char *name;
-	const struct test_entry *start;
-	const struct test_entry *stop;
-};
+#define GROUP_COUNT(grp)	((size_t)(__stop_units_##grp - __start_units_##grp))
 
-struct test_category {
-	const char *name;
-	const struct test_group *groups;
-	size_t num_groups;
-};
-
-static const struct test_group hart_groups[] = {
-	{ "Privileged",   __start_rodata_menu_hart_priv,   __stop_rodata_menu_hart_priv },
-	{ "Unprivileged", __start_rodata_menu_hart_unpriv, __stop_rodata_menu_hart_unpriv },
-};
-
-static const struct test_group platform_groups[] = {
-	{ "Platform tests", __start_rodata_menu_platform, __stop_rodata_menu_platform },
-};
-
-static const struct test_group yalibc_groups[] = {
-	{ "YaLibC tests", __start_rodata_menu_yalibc, __stop_rodata_menu_yalibc },
-};
-
-static const struct test_category categories[] = {
-	{ "Hart Tests",     hart_groups,     sizeof(hart_groups) / sizeof(hart_groups[0]) },
-	{ "Platform Tests", platform_groups, sizeof(platform_groups) / sizeof(platform_groups[0]) },
-	{ "YaLibC Tests",   yalibc_groups,   sizeof(yalibc_groups) / sizeof(yalibc_groups[0]) },
-};
-
-/* Run every entry in a group back-to-back: tests get a pass/fail verdict and
- * feed the failure tally, probes just report their output. */
+/* Array index of the Nth (1-based) set bit in `mask`, or -1 if there are fewer.
+ * Maps a continuous display number back to its sparse unit_probe array slot. */
 static int
-summarize_group(const struct test_group *g)
+nth_present(uint64_t mask, unsigned n)
 {
-	size_t num_entries = g->stop - g->start;
-	int total_failures = 0;
-	unsigned tests = 0, probes = 0;
-
-	ANN("\n---=== %s: Run all ===---\n", g->name);
-	for (size_t i = 0; i < num_entries; i++) {
-		const struct test_entry *e = &g->start[i];
-		int result = e->test_fn();
-
-		/* Probes just report (output printed by the entry itself); only
-		 * tests carry a pass/fail verdict and feed the failure tally. */
-		if (menu_entry_is_probe(e)) {
-			probes++;
-			continue;
-		}
-		tests++;
-		total_failures += result;
-		if (result == 0)
-			INF("[PASS] %s\n", menu_entry_name(e));
-		else
-			INF("[FAIL] %s (%d errors)\n", menu_entry_name(e), result);
-	}
-	INF("\n%s summary: %u tests, %d failures", g->name, tests, total_failures);
-	if (probes)
-		INF(" (%u probes)", probes);
-	INF("\n");
-	return total_failures;
+	for (int i = 0; i < 64; i++)
+		if ((mask & (1ull << i)) && --n == 0)
+			return i;
+	return -1;
 }
 
-/* Interactive list for a single group: run one test, run all, or go back. */
+/* Read a decimal number from the console: skip leading non-digits (e.g. a stray
+ * newline), then read digits, echoing them (the serial line is in raw mode, so the
+ * terminal doesn't echo). Returns the value, or -1 if none was entered. */
 static int
-run_group(const struct test_group *g)
+read_index(void)
 {
-	size_t num_entries = g->stop - g->start;
-	int total_failures = 0;
+	int c, val;
 
+	while ((c = getchar()) != EOF && (c < '0' || c > '9'))
+		;
+	if (c == EOF)
+		return -1;
+	putchar(c);
+	for (val = c - '0'; (c = getchar()) >= '0' && c <= '9'; ) {
+		putchar(c);
+		val = val * 10 + (c - '0');
+	}
+	putchar('\n');
+	return val;
+}
+
+/* Prompt for a displayed unit number and run `op` (one of PROBE_INTERACTIVE /
+ * PROBE_BENCH / PROBE_FUZZ) on it, if it supports it. */
+static void
+run_one(const struct unit_probe *units, uint64_t present, unsigned op)
+{
+	INF("Unit #: ");
+	int n = read_index();
+	int idx = (n > 0) ? nth_present(present, (unsigned)n) : -1;
+
+	if (idx < 0) {
+		INF("No such unit.\n");
+		return;
+	}
+	if (!(units[idx].probe(0) & op)) {
+		INF("%s does not support that.\n", units[idx].name);
+		return;
+	}
+	if (units[idx].probe(op) == PROBE_FAILED)
+		INF("\n%s: FAILED\n", units[idx].name);
+}
+
+void
+run_group_menu(const char *title, const struct unit_probe *units, size_t count)
+{
 	while (1) {
-		ANN("\n---=== %s ===---\n", g->name);
-		INF("Select:\n");
-		for (size_t i = 0; i < num_entries; i++)
-			INF("\t%zu -> %s\n", i + 1, menu_entry_name(&g->start[i]));
-		INF("\ta -> Run all (summary)\n");
-		INF("\t0 -> Back\n");
+		uint64_t present = 0;
+		unsigned any = 0, shown = 0;
 
-		int input = getchar();
-		if (input == EOF) {
+		ANN("\n---=== %s ===---\n", title);
+		for (size_t i = 0; i < count && i < 64; i++) {
+			int caps = units[i].probe(0);
+
+			if (caps < 0)
+				continue;		/* absent / failed: skip */
+			present |= 1ull << i;
+			any |= (unsigned)caps;
+			INF("  %2u) %s\n", ++shown, units[i].name);
+			if (caps & PROBE_INFO)
+				units[i].probe(PROBE_INFO);	/* indented detail */
+		}
+		if (!shown)
+			INF("  (nothing present)\n");
+
+		INF("\nSelect:\n");
+		if (any & PROBE_INTERACTIVE)
+			INF("\tr -> run a test\n");
+		if (any & PROBE_BENCH) {
+			INF("\tb -> benchmark one\n");
+			INF("\ta -> benchmark all\n");
+		}
+		if (any & PROBE_FUZZ)
+			INF("\tf -> fuzz one\n");
+		INF("\t0 -> back\n");
+
+		int sel = getchar();
+		if (sel == EOF) {
 			pause();
 			continue;
 		}
-
-		if (input == '0')
-			return total_failures;
-
-		if (input == 'a' || input == 'A') {
-			total_failures += summarize_group(g);
-			pause();
-			continue;
+		switch (sel) {
+		case '0':
+			return;
+		case 'r':
+		case 'R':
+			if (any & PROBE_INTERACTIVE)
+				run_one(units, present, PROBE_INTERACTIVE);
+			break;
+		case 'b':
+		case 'B':
+			if (any & PROBE_BENCH)
+				run_one(units, present, PROBE_BENCH);
+			break;
+		case 'f':
+		case 'F':
+			if (any & PROBE_FUZZ)
+				run_one(units, present, PROBE_FUZZ);
+			break;
+		case 'a':
+		case 'A':
+			if (any & PROBE_BENCH)
+				for (size_t i = 0; i < count && i < 64; i++)
+					if ((present & (1ull << i)) &&
+					    (units[i].probe(0) & PROBE_BENCH))
+						units[i].probe(PROBE_BENCH | PROBE_COMPACT);
+			break;
+		default:
+			INF("Invalid selection.\n");
+			break;
 		}
-
-		int entry_num = input - '1';
-		if (entry_num >= 0 && (size_t)entry_num < num_entries) {
-			const struct test_entry *e = &g->start[entry_num];
-			int result = e->test_fn();
-
-			/* Probes just report; only tests carry a verdict. */
-			if (!menu_entry_is_probe(e)) {
-				if (result != 0) {
-					total_failures += result;
-					INF("\nTest failed with %d errors\n", result);
-				}
-				INF("\nTotal failures so far: %i\n", total_failures);
-			}
-		} else {
-			INF("Invalid selection. Please try again.\n");
-		}
-
 		pause();
 	}
 }
 
-/* A category: single-group ones go straight to the test list; multi-group ones
- * show a sub-menu of groups plus a cumulative run-all across every group. */
-static int
-run_category(const struct test_category *c)
+/* Privileged sub-menu: the M/S/U/Z groups. */
+static void
+menu_privileged(void)
 {
-	if (c->num_groups == 1)
-		return run_group(&c->groups[0]);
-
-	int total_failures = 0;
-
 	while (1) {
-		ANN("\n---=== %s ===---\n", c->name);
-		INF("Select a group:\n");
-		for (size_t i = 0; i < c->num_groups; i++)
-			INF("\t%zu -> %s\n", i + 1, c->groups[i].name);
-		INF("\t%zu -> Run all (summary)\n", c->num_groups + 1);
-		INF("\t0 -> Back\n");
+		ANN("\n---=== Privileged extensions ===---\n");
+		INF("\t1 -> M-mode\n"
+		    "\t2 -> S-mode\n"
+		    "\t3 -> U-mode & Z* (common)\n"
+		    "\t0 -> back\n");
 
-		int input = getchar();
-		if (input == EOF) {
+		int sel = getchar();
+		if (sel == EOF) {
 			pause();
 			continue;
 		}
-
-		if (input == '0')
-			return total_failures;
-
-		size_t sel = (size_t)(input - '1');
-		if (input >= '1' && sel < c->num_groups) {
-			total_failures += run_group(&c->groups[sel]);
-		} else if (input >= '1' && sel == c->num_groups) {
-			for (size_t i = 0; i < c->num_groups; i++)
-				total_failures += summarize_group(&c->groups[i]);
-			INF("\n%s total failures: %i\n", c->name, total_failures);
+		switch (sel) {
+		case '1':
+			run_group_menu("M-mode extensions", __start_units_hart_priv_m,
+				       GROUP_COUNT(hart_priv_m));
+			break;
+		case '2':
+			run_group_menu("S-mode extensions", __start_units_hart_priv_s,
+				       GROUP_COUNT(hart_priv_s));
+			break;
+		case '3':
+			run_group_menu("U-mode & Z* extensions", __start_units_hart_priv_z,
+				       GROUP_COUNT(hart_priv_z));
+			break;
+		case '0':
+			return;
+		default:
+			INF("Invalid selection.\n");
 			pause();
-		} else {
-			INF("Invalid selection. Please try again.\n");
+			break;
+		}
+	}
+}
+
+/* Hart probing sub-menu: privileged and unprivileged. */
+static void
+menu_hart(void)
+{
+	while (1) {
+		ANN("\n---=== Hart probing ===---\n");
+		INF("\t1 -> Privileged extensions\n"
+		    "\t2 -> Unprivileged extensions\n"
+		    "\t0 -> back\n");
+
+		int sel = getchar();
+		if (sel == EOF) {
 			pause();
+			continue;
+		}
+		switch (sel) {
+		case '1':
+			menu_privileged();
+			break;
+		case '2':
+			run_group_menu("Unprivileged extensions", __start_units_hart_unpriv,
+				       GROUP_COUNT(hart_unpriv));
+			break;
+		case '0':
+			return;
+		default:
+			INF("Invalid selection.\n");
+			pause();
+			break;
 		}
 	}
 }
@@ -183,32 +217,38 @@ run_category(const struct test_category *c)
 int __attribute__((noreturn))
 main(void)
 {
-	int total_failures = 0;
-	size_t num_categories = sizeof(categories) / sizeof(categories[0]);
 	DBG("At main\n");
 
 	while (1) {
 		struct hart_state *hs = hart_get_hstate_self();
+
 		ANN("\n---=== TestSuite Menu ===---\n");
 		INF("Welcome from hart: %i, hart_id: %li\n", hs->hart_idx, hs->hart_id);
-		INF("Select test category:\n");
-		for (size_t i = 0; i < num_categories; i++)
-			INF("\t%zu -> %s\n", i + 1, categories[i].name);
+		INF("\t1 -> Hart probing\n"
+		    "\t2 -> Platform probing\n"
+		    "\t3 -> YaLibC tests\n");
 
-		int input = getchar();
-		if (input == EOF) {
+		int sel = getchar();
+		if (sel == EOF) {
 			pause();
 			continue;
 		}
-
-		size_t sel = (size_t)(input - '1');
-		if (input >= '1' && sel < num_categories) {
-			total_failures += run_category(&categories[sel]);
-			INF("\nTotal failures across all tests: %i\n", total_failures);
-		} else {
-			INF("Invalid selection. Please try again.\n");
+		switch (sel) {
+		case '1':
+			menu_hart();
+			break;
+		case '2':
+			run_group_menu("Platform probing", __start_units_platform,
+				       GROUP_COUNT(platform));
+			break;
+		case '3':
+			run_group_menu("YaLibC tests", __start_units_yalibc,
+				       GROUP_COUNT(yalibc));
+			break;
+		default:
+			INF("Invalid selection.\n");
+			break;
 		}
-
 		pause();
 	}
 }

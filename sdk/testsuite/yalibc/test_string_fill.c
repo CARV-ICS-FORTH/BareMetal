@@ -14,8 +14,11 @@
 #include <test_framework.h>		/* For test registration macros */
 
 static int
-test_string_fill(void)
+test_string_fill(unsigned flags)
 {
+	if (!flags)		/* probe: present, run on demand */
+		return PROBE_INTERACTIVE;
+
 	int failures = 0;
 
 	ANN("\n---===String Fill Tests===---\n");
@@ -183,7 +186,7 @@ test_string_fill(void)
 	INF("=== String Fill Test Results: %s (%d failures) ===\n",
 	    failures == 0 ? "PASS" : "FAIL", failures);
 
-	return failures;
+	return failures ? PROBE_FAILED : 0;
 }
 
-REGISTER_YALIBC_TEST("String fill tests", test_string_fill);
+REGISTER_YALIBC("String fill tests", test_string_fill);

@@ -16,8 +16,11 @@
 #define NUM_DRAWS	10000
 
 static int
-test_rand(void)
+test_rand(unsigned flags)
 {
+	if (!flags)		/* probe: present, run on demand */
+		return PROBE_INTERACTIVE;
+
 	int failures = 0;
 
 	ANN("\n---===Rand tests===---\n");
@@ -75,7 +78,7 @@ test_rand(void)
 	}
 
 	INF("Press a key to continue...\n");
-	return failures;
+	return failures ? PROBE_FAILED : 0;
 }
 
-REGISTER_YALIBC_TEST("Rand tests", test_rand);
+REGISTER_YALIBC("Rand tests", test_rand);

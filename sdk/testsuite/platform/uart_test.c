@@ -19,8 +19,11 @@
 #include <stdint.h>			/* For typed ints */
 
 static int
-uart_loopback_poll(void)
+uart_loopback_poll(unsigned flags)
 {
+	if (!flags)
+		return PROBE_FUZZ;
+
 	ANN("\n---=== UART Loopback Test (Polling mode) ===---\n");
 	INF("Press Q to exit...\n");
 	while(1 == 1){
@@ -52,8 +55,11 @@ uart_irq_test_handler(uint16_t source_id)
 }
  
 static int
-uart_loopback_irq(void)
+uart_loopback_irq(unsigned flags)
 {
+	if (!flags)
+		return PROBE_FUZZ;
+
 	ANN("\n---=== UART Loopback Test (IRQ mode) ===---\n");
 	INF("Press Q to exit...\n");
 	uart_set_irq_handler(&uart_irq_test_handler);
@@ -73,5 +79,5 @@ uart_loopback_irq(void)
 	return 0;
 }
 
-REGISTER_PLATFORM_TEST("UART loopback test (polling mode)", uart_loopback_poll);
-REGISTER_PLATFORM_TEST("UART loopback test (IRQ mode)", uart_loopback_irq);
+REGISTER_PLATFORM("UART loopback test (polling mode)", uart_loopback_poll);
+REGISTER_PLATFORM("UART loopback test (IRQ mode)", uart_loopback_irq);

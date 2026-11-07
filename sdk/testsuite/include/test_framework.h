@@ -10,68 +10,85 @@
 #ifndef TEST_FRAMEWORK_H
 #define TEST_FRAMEWORK_H
 
-#include <stdbool.h>			/* For bool in the helpers below */
-
-typedef int (*test_func_t)(void);
-
-struct test_entry {
-	/* First char is a one-byte kind marker (MENU_MARK_*); the human-readable
-	 * text starts at description[1]. Menu code skips the marker when printing
-	 * and checks it to decide whether to render a pass/fail verdict. */
-	const char *description;
-	test_func_t test_fn;
-} __attribute__((packed));
+#include <stddef.h>			/* For size_t */
 
 /*
- * An entry is either a PROBE or a TEST:
- *   - PROBE: detect & report a capability. Absence is a valid result, so there
- *     is no pass/fail -- the menu just runs it and shows its output.
- *   - TEST: asserts something and returns a failure count, rendered pass/fail.
+ * The test suite is a flat set of "units": an extension, a privileged feature, a
+ * platform test or a libc test. Each unit is one probe function, run in a mix of
+ * modes selected by `flags`:
+ *   PROBE_BENCH       - run the payload repeatedly and measure/report.
+ *   PROBE_INFO        - print the unit's details (counters, PMP granule, ASID ...).
+ *   PROBE_INTERACTIVE - run the payload once, showing its output (a plain test).
+ *   PROBE_FUZZ        - run open-ended until an error or the user presses 'q'.
+ *   PROBE_COMPACT     - modifier for PROBE_BENCH: one compact line (group benchmark).
  *
- * Rather than spend a struct field on this, the kind is encoded as a one-char
- * marker prefixed to the description by the register macro. For menu ordering,
- * entries are placed in a per-group input subsection named after the registered
- * symbol, and symbols are named <...>probe_* / <...>test_* so SORT_BY_NAME (in
- * test_sections.ld) naturally lists a group's probes before its tests.
+ * With no flags the function is a pure probe (run once; present and working?). It
+ * returns which operations it supports, so the menu offers them conditionally:
+ *   >= 0   present, OR-ed with any of PROBE_BENCH / PROBE_INFO / PROBE_INTERACTIVE /
+ *          PROBE_FUZZ it supports (the capability bits reuse the flag values);
+ *   PROBE_ABSENT (-1)   not present;
+ *   PROBE_FAILED (-2)   the probe / benchmark / fuzz failed.
+ * With any flag set it returns only 0 (ok) or PROBE_FAILED.
  */
-#define MENU_MARK_PROBE	"\x01"
-#define MENU_MARK_TEST	"\x02"
+enum probe_flags {
+	PROBE_BENCH		= 1,
+	PROBE_INFO		= 2,
+	PROBE_INTERACTIVE	= 4,
+	PROBE_FUZZ		= 8,
+	PROBE_COMPACT		= 16,
+};
 
-#define __REGISTER_ENTRY(sect, func, mark, desc) \
-	static const struct test_entry __menu_##func \
-		__attribute__((section(sect "." #func), used, aligned(16))) = { \
-			.description = mark desc, \
-			.test_fn = (func) \
+#define PROBE_ABSENT	(-1)
+#define PROBE_FAILED	(-2)
+
+typedef int (*probe_fn)(unsigned flags);
+
+/*
+ * One per unit, gathered by the linker into a per-group array (test_sections.ld)
+ * walked by index / counted as (stop - start), so the array stride must equal
+ * sizeof(struct unit_probe); the 16-byte alignment keeps sizeof a multiple of 16
+ * (matching the ALIGN(16) before each __stop) and the members naturally aligned
+ * under -mstrict-align. The symbol is named after the probe fn (named after the
+ * unit) so SORT_BY_NAME orders the group -- a new unit is just a new REGISTER_*
+ * line (ideally its own .c file), no caller changes.
+ */
+struct unit_probe {
+	const char *name;
+	probe_fn probe;
+} __attribute__((aligned(16)));
+
+#define __REGISTER_UNIT(sect, fn, unit_name) \
+	static const struct unit_probe __unit_##fn \
+		__attribute__((section(sect "." #fn), used)) = { \
+			.name = (unit_name), \
+			.probe = (fn) \
 		}
 
-#define REGISTER_YALIBC_TEST(desc, func)	__REGISTER_ENTRY("__menu_yalibc", func, MENU_MARK_TEST, desc)
-#define REGISTER_PLATFORM_TEST(desc, func)	__REGISTER_ENTRY("__menu_platform", func, MENU_MARK_TEST, desc)
-#define REGISTER_HART_PRIV_PROBE(desc, func)	__REGISTER_ENTRY("__menu_hart_priv", func, MENU_MARK_PROBE, desc)
-#define REGISTER_HART_PRIV_TEST(desc, func)	__REGISTER_ENTRY("__menu_hart_priv", func, MENU_MARK_TEST, desc)
-#define REGISTER_HART_UNPRIV_PROBE(desc, func)	__REGISTER_ENTRY("__menu_hart_unpriv", func, MENU_MARK_PROBE, desc)
-#define REGISTER_HART_UNPRIV_TEST(desc, func)	__REGISTER_ENTRY("__menu_hart_unpriv", func, MENU_MARK_TEST, desc)
+#define REGISTER_HART_PRIV_M(name, fn)	__REGISTER_UNIT("__units_hart_priv_m", fn, name)
+#define REGISTER_HART_PRIV_S(name, fn)	__REGISTER_UNIT("__units_hart_priv_s", fn, name)
+/* U-mode and common Z* overlap (Z* is unprivileged, user-visible), so they share
+ * one group/file (hart_priv_zexts.c). */
+#define REGISTER_HART_PRIV_Z(name, fn)	__REGISTER_UNIT("__units_hart_priv_z", fn, name)
+#define REGISTER_HART_UNPRIV(name, fn)	__REGISTER_UNIT("__units_hart_unpriv", fn, name)
+#define REGISTER_PLATFORM(name, fn)	__REGISTER_UNIT("__units_platform", fn, name)
+#define REGISTER_YALIBC(name, fn)	__REGISTER_UNIT("__units_yalibc", fn, name)
 
-/* Skip the kind marker to get the printable description. */
-static inline const char *
-menu_entry_name(const struct test_entry *e)
-{
-	return &e->description[1];
-}
+#define __UNITS_GROUP(grp) \
+	extern const struct unit_probe __start_units_##grp[], __stop_units_##grp[]
+__UNITS_GROUP(hart_priv_m);
+__UNITS_GROUP(hart_priv_s);
+__UNITS_GROUP(hart_priv_z);
+__UNITS_GROUP(hart_unpriv);
+__UNITS_GROUP(platform);
+__UNITS_GROUP(yalibc);
+#undef __UNITS_GROUP
 
-/* A probe has no pass/fail verdict; a test does. */
-static inline bool
-menu_entry_is_probe(const struct test_entry *e)
-{
-	return e->description[0] == MENU_MARK_PROBE[0];
-}
+/*
+ * Interactive menu for one group: probe every unit once, list the present ones with
+ * a continuous index (printing details for those that report PROBE_INFO), then --
+ * conditional on the group's capabilities -- let the user benchmark all, or
+ * run/benchmark/fuzz a chosen unit, or go back.
+ */
+void run_group_menu(const char *title, const struct unit_probe *units, size_t count);
 
-extern struct test_entry __start_rodata_menu_yalibc[];
-extern struct test_entry __stop_rodata_menu_yalibc[];
-extern struct test_entry __start_rodata_menu_platform[];
-extern struct test_entry __stop_rodata_menu_platform[];
-extern struct test_entry __start_rodata_menu_hart_priv[];
-extern struct test_entry __stop_rodata_menu_hart_priv[];
-extern struct test_entry __start_rodata_menu_hart_unpriv[];
-extern struct test_entry __stop_rodata_menu_hart_unpriv[];
-
-#endif
+#endif /* TEST_FRAMEWORK_H */

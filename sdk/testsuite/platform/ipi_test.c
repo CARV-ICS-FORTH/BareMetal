@@ -13,15 +13,18 @@
 #include <test_framework.h>		/* For test registration macros */
 
 static int
-test_ipi(void)
+test_ipi(unsigned flags)
 {
+	if (!flags)
+		return PROBE_INTERACTIVE;
+
 	ANN("\n---=== IPI Test ===---\n");
 	struct hart_state* this_hs = hart_get_hstate_self();
 	int num_harts = hart_get_count();
 	if (num_harts == 1) {
 		WRN("Only one hart came up, won't send IPI to self\n");
 		INF("Press a key to continue...\n");
-		return 1;
+		return PROBE_FAILED;
 	}
 
 	INF("Choose a hart to wake up...\n");
@@ -62,5 +65,4 @@ test_ipi(void)
 	INF("Press a key to continue...\n");
 	return 0;
 }
-
-REGISTER_PLATFORM_TEST("IPI (Inter-Processor Interrupt) test", test_ipi);
+REGISTER_PLATFORM("IPI (Inter-Processor Interrupt) test", test_ipi);

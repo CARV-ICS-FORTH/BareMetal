@@ -89,8 +89,11 @@ test_putll(long long int itest)
 }
 
 static int
-test_printf(void)
+test_printf(unsigned flags)
 {
+	if (!flags)		/* probe: present, run on demand */
+		return PROBE_INTERACTIVE;
+
 	ANN("\n---===PRINTF TEST===---\n");
 
 	INF("\n---INTS---\n");
@@ -365,7 +368,7 @@ test_printf(void)
 	}
 
 	INF("Press a key to continue...\n");
-	return failures;
+	return failures ? PROBE_FAILED : 0;
 }
 
-REGISTER_YALIBC_TEST("Printf tests", test_printf);
+REGISTER_YALIBC("Printf tests", test_printf);

@@ -96,8 +96,11 @@ timespecsub(struct timespec *a, struct timespec *b, struct timespec *res)
  * and is cross-checked separately below.
  */
 static int
-test_nanosleep(void)
+test_nanosleep(unsigned flags)
 {
+	if (!flags)
+		return PROBE_INTERACTIVE;
+
 	ANN("\n---=== Nanosleep Mechanism Test ===---\n");
 	const struct timespec ts_delay = { .tv_nsec = 200 * 1000 * 1000 }; /* 200ms */
 	const long min_nsec = 180 * 1000 * 1000;	/* 200ms -10% */
@@ -140,10 +143,9 @@ test_nanosleep(void)
 		ret = 1;
 	}
 	INF("Press a key to continue...\n");
-	return ret;
+	return ret ? PROBE_FAILED : 0;
 }
-
-REGISTER_PLATFORM_TEST("Nanosleep mechanism test", test_nanosleep);
+REGISTER_PLATFORM("Nanosleep mechanism test", test_nanosleep);
 
 /*
  * Clock cross-check: MTIMER (mtime) vs the cycle counter (mcycle).
@@ -165,8 +167,11 @@ REGISTER_PLATFORM_TEST("Nanosleep mechanism test", test_nanosleep);
  * being scaled underneath us (varying ratio).
  */
 static int
-test_clock_crosscheck(void)
+test_clock_crosscheck(unsigned flags)
 {
+	if (!flags)
+		return PROBE_INTERACTIVE;
+
 	ANN("\n---=== Clock Cross-check (MTIMER vs cycle counter) ===---\n");
 #ifdef PLAT_NO_MTIMER
 	WRN("No MTIMER present; the cycle counter is the only time source - "
@@ -262,8 +267,7 @@ test_clock_crosscheck(void)
 		ret = 1;
 	}
 	INF("Press a key to continue...\n");
-	return ret;
+	return ret ? PROBE_FAILED : 0;
 #endif
 }
-
-REGISTER_PLATFORM_TEST("Clock cross-check (timer vs cycles)", test_clock_crosscheck);
+REGISTER_PLATFORM("Clock cross-check (timer vs cycles)", test_clock_crosscheck);

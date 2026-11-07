@@ -72,8 +72,11 @@ REGISTER_IRQ_SOURCE(aplic_test_low, {
 });
 
 static int
-test_aplic_pending(void)
+test_aplic_pending(unsigned flags)
 {
+	if (!flags)
+		return PROBE_INTERACTIVE;
+
 	ANN("\n---=== APLIC Interrupt Pending Test ===---\n");
 
 	INF("Testing APLIC interrupt pending bit control (source %u)\n", TEST_SOURCE_ID);
@@ -184,12 +187,14 @@ test_aplic_pending(void)
 
 	return 0;
 }
-
-REGISTER_PLATFORM_TEST("APLIC interrupt pending test", test_aplic_pending);
+REGISTER_PLATFORM("APLIC interrupt pending test", test_aplic_pending);
 
 static int
-test_aplic_delivery(void)
+test_aplic_delivery(unsigned flags)
 {
+	if (!flags)
+		return PROBE_INTERACTIVE;
+
 	ANN("\n---=== APLIC Interrupt Delivery Test ===---\n");
 
 	INF("Testing APLIC interrupt delivery to hart (source %u)\n", TEST_SOURCE_ID);
@@ -303,8 +308,7 @@ test_aplic_delivery(void)
 
 	return 0;
 }
-
-REGISTER_PLATFORM_TEST("APLIC interrupt delivery test", test_aplic_delivery);
+REGISTER_PLATFORM("APLIC interrupt delivery test", test_aplic_delivery);
 
 /* Same as the delivery test above but with a source registered with
  * IRQ_PRIORITY_LOW. In direct mode such sources used to be masked
@@ -313,8 +317,11 @@ REGISTER_PLATFORM_TEST("APLIC interrupt delivery test", test_aplic_delivery);
  * where IRQ_PRIORITY_LOW maps. In MSI mode priorities don't apply
  * (EIIDs are used instead), the test should pass either way. */
 static int
-test_aplic_delivery_low(void)
+test_aplic_delivery_low(unsigned flags)
 {
+	if (!flags)
+		return PROBE_INTERACTIVE;
+
 	ANN("\n---=== APLIC Low-priority Delivery Test ===---\n");
 
 	INF("Testing delivery of an IRQ_PRIORITY_LOW source (%u)\n", TEST_SOURCE_LOW_ID);
@@ -354,7 +361,6 @@ test_aplic_delivery_low(void)
 	INF("\nPress a key to continue...\n");
 	return 0;
 }
-
-REGISTER_PLATFORM_TEST("APLIC low-priority delivery test", test_aplic_delivery_low);
+REGISTER_PLATFORM("APLIC low-priority delivery test", test_aplic_delivery_low);
 
 #endif /* defined(PLAT_HAS_APLIC) */

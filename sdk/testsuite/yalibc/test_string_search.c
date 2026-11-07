@@ -16,8 +16,11 @@
 #define TESTBUFF_LEN 2048
 
 static int
-test_string_search(void)
+test_string_search(unsigned flags)
 {
+	if (!flags)		/* probe: present, run on demand */
+		return PROBE_INTERACTIVE;
+
 	int failures = 0;
 
 	ANN("\n---===String Search Tests===---\n");
@@ -740,7 +743,7 @@ test_string_search(void)
 	INF("=== String Search Test Results: %s (%d failures) ===\n",
 	    failures == 0 ? "PASS" : "FAIL", failures);
 
-	return failures;
+	return failures ? PROBE_FAILED : 0;
 }
 
-REGISTER_YALIBC_TEST("String search tests", test_string_search);
+REGISTER_YALIBC("String search tests", test_string_search);

@@ -13,8 +13,11 @@
 #include <test_framework.h>		/* For test registration macros */
 
 static int
-test_allocator(void)
+test_allocator(unsigned flags)
 {
+	if (!flags)		/* probe: present, run on demand */
+		return PROBE_INTERACTIVE;
+
 	int failures = 0;
 
 	ANN("\n---===Memory allocator tests===---\n");
@@ -470,7 +473,7 @@ test_allocator(void)
 	#undef CHECK_ZERO
 
 	INF("Press a key to continue...\n");
-	return failures;
+	return failures ? PROBE_FAILED : 0;
 }
 
-REGISTER_YALIBC_TEST("Memory allocator tests", test_allocator);
+REGISTER_YALIBC("Memory allocator tests", test_allocator);

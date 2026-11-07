@@ -16,8 +16,11 @@
 #define TESTBUFF_LEN 2048
 
 static int
-test_string_copy(void)
+test_string_copy(unsigned flags)
 {
+	if (!flags)		/* probe: present, run on demand */
+		return PROBE_INTERACTIVE;
+
 	int failures = 0;
 	int ret = 0;
 
@@ -482,7 +485,7 @@ test_string_copy(void)
 	INF("=== String Copy Test Results: %s (%d failures) ===\n",
 	    failures == 0 ? "PASS" : "FAIL", failures);
 
-	return failures;
+	return failures ? PROBE_FAILED : 0;
 }
 
-REGISTER_YALIBC_TEST("String copy tests", test_string_copy);
+REGISTER_YALIBC("String copy tests", test_string_copy);

@@ -39,9 +39,12 @@ wakeup_test_entry(uint64_t arg0, uint64_t arg1)
 }
 
 static int
-test_wakeup_args(void)
+test_wakeup_args(unsigned flags)
 {
 	int failures = 0;
+
+	if (!flags)
+		return PROBE_INTERACTIVE;
 
 	ANN("\n---=== Hart Wakeup-with-args Test ===---\n");
 
@@ -103,9 +106,8 @@ test_wakeup_args(void)
 		INF("All harts got their own arguments\n");
 
 	INF("Press a key to continue...\n");
-	return failures;
+	return failures ? PROBE_FAILED : 0;
 }
-
-REGISTER_PLATFORM_TEST("Hart wakeup with args test", test_wakeup_args);
+REGISTER_PLATFORM("Hart wakeup with args test", test_wakeup_args);
 
 #endif /* !defined(PLAT_NO_IPI) */
