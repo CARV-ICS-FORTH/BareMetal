@@ -66,6 +66,7 @@ run_one(const struct unit_probe *units, uint64_t present, unsigned op)
 		INF("%s does not support that.\n", units[idx].name);
 		return;
 	}
+	INF("\n");		/* separate the op's output from the prompt */
 	if (units[idx].probe(op) == PROBE_FAILED)
 		INF("\n%s: FAILED\n", units[idx].name);
 }

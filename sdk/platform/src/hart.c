@@ -410,6 +410,7 @@ hart_exception_handler(void) {
 	uintptr_t mepc = csr_read(CSR_MEPC);
 	uint64_t mstatus = csr_read(CSR_MSTATUS);
 	struct hart_state *hs = hart_get_hstate_self();
+	unsigned pc_step = 4;
 
 	if (mcause & CSR_MCAUSE_INTR) {
 		ERR("Exception handler called for interrupt ! mcause: 0x%lx !\n", mcause);
@@ -443,6 +444,16 @@ hart_exception_handler(void) {
 				} else
 					DBG("Unimplemented SYSTEM instruction: %#.8x\n", ill_inst);
 				hs->error = ENOSYS;
+				goto skip;
+			}
+			/* Outside SYSTEM, an illegal instruction normally means a bug
+			 * and we hang. But if a hart is probing for an extension by
+			 * executing one of its instructions, step over it and flag it.
+			 * A compressed op (low 2 bits != 11) is 2 bytes, else 4. */
+			if (hart_test_flags(hs, HS_FLAG_PROBING)) {
+				hs->error = ENOSYS;
+				if ((ill_inst & 0x3) != 0x3)
+					pc_step = 2;
 				goto skip;
 			}
 			ERR("Illegal instruction at 0x%lx, mtval: 0x%lx\n", mepc, mtval);
@@ -500,7 +511,7 @@ hart_exception_handler(void) {
 	csr_write(CSR_MEPC, mepc);
 	return;
  skip:
-	mepc += 4;
+	mepc += pc_step;
 	csr_write(CSR_MEPC, mepc);
 	return;
 }

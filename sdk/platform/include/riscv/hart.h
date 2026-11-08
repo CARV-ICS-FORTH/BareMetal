@@ -77,7 +77,8 @@ enum state_flags {
 	HS_FLAG_READY		= BIT(0),
 	HS_FLAG_RUNNING		= BIT(1),
 	HS_FLAG_SLEEPING	= BIT(2),
-	HS_FLAG_CAPS_IS_PTR	= BIT(3)
+	HS_FLAG_CAPS_IS_PTR	= BIT(3),
+	HS_FLAG_PROBING		= BIT(4)
 };
 
 /* Static assert to ensure size */
