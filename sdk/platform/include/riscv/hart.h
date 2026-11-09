@@ -297,7 +297,15 @@ int hart_va_map_range(uintptr_t phys_addr, size_t *size, uint64_t mode, bool nap
 /* Entry points on hart.c */
 void hart_init(void);
 void hart_configure_imsic_eiid(uint16_t hart_idx, uint16_t eiid, bool enable);
-void hart_wakeup_with_addr(uint16_t hart_idx, uintptr_t jump_addr, uint64_t arg0, 
+/*
+ * Wake up a hart (hart_wakeup_with_addr) or all harts (hart_wakeup_all_with_addr)
+ * and dispatch them to jump_addr(arg0, arg1). mtimer_cycles is an optional delay
+ * in mtime ticks (PLAT_MTIMER_FREQ), applied before the jump: the target sleeps
+ * that many ticks from the moment it's dispatched, 0 means no delay. It's a
+ * relative duration, not an absolute mtimecmp value - convert a time span with
+ * timer_nsecs_to_cycles(CLOCK_REALTIME/MONOTONIC, nsecs).
+ */
+void hart_wakeup_with_addr(uint16_t hart_idx, uintptr_t jump_addr, uint64_t arg0,
 			   uint64_t arg1, uint64_t mtimer_cycles);
 void hart_wakeup_all_with_addr(uintptr_t jump_addr, uint64_t arg0, uint64_t arg1,
 			  uint64_t mtimer_cycles);

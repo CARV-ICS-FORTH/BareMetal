@@ -119,6 +119,9 @@ mtimer_arm_after_ticks(uint64_t cycles)
 	mtimer_set_mtimecmp(hart_id, current_count + cycles);
 }
 
+/* Arm mtimecmp with an ABSOLUTE mtime value. Don't pass it a duration: mtime
+ * isn't guaranteed to start from 0 (e.g. the C906 CLINT's free-running
+ * counter), use mtimer_arm_after_ticks() for a delay from now. */
 static inline void
 mtimer_arm_at(uint64_t cycles)
 {

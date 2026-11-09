@@ -17,6 +17,7 @@
 #include <platform/utils/utils.h>	/* For console output */
 #include <platform/riscv/csr.h>		/* For wfi()/pause() */
 #include <platform/riscv/hart.h>	/* For hart_wakeup_with_addr() etc */
+#include <platform/riscv/mtimer.h>	/* For mtimer_get_num_ticks()/freq() */
 #include <test_framework.h>		/* For test registration macros */
 
 /* What each woken hart observed as its arguments */
@@ -109,5 +110,110 @@ test_wakeup_args(unsigned flags)
 	return failures ? PROBE_FAILED : 0;
 }
 REGISTER_PLATFORM("Hart wakeup with args test", test_wakeup_args);
+
+#ifndef PLAT_NO_MTIMER
+/* mtime tick the timed-wakeup target observed when its entry finally ran */
+static volatile uint64_t observed_wakeup_tick = 0;
+static atomic_int timed_hart_done = 0;
+
+static void
+timed_wakeup_entry(uint64_t arg0, uint64_t arg1)
+{
+	(void)arg0;
+	(void)arg1;
+	/* We're dispatched only after the requested delay elapsed. mtime is the
+	 * shared wall clock, so this reads in the same domain as the waker's t0
+	 * below (see hart_wakeup_with_addr's mtimer_cycles contract). */
+	observed_wakeup_tick = mtimer_get_num_ticks();
+	atomic_store_explicit(&timed_hart_done, 1, memory_order_release);
+
+	/* Park until the next wakeup */
+	while (1 == 1) {
+		wfi();
+	}
+}
+
+/*
+ * Timed wakeup test: wake a secondary hart with a non-zero mtimer_cycles and
+ * verify it's dispatched ~that many mtime ticks later. This exercises the
+ * mtimer_cycles path (mtimer_arm_after_ticks -> wfi -> timer IRQ -> jump) that
+ * the args test above never touches (it always passes 0). It catches both
+ * failure modes of a broken delay: a hang (target never runs -> we time out)
+ * and a deadline armed in the wrong units/domain (fires immediately -> the
+ * observed delay collapses to ~0 and falls below the lower bound).
+ */
+static int
+test_wakeup_timed(unsigned flags)
+{
+	if (!flags)
+		return PROBE_INTERACTIVE;
+
+	ANN("\n---=== Hart Timed-Wakeup Test ===---\n");
+
+	int num_harts = hart_get_count();
+	if (num_harts == 1) {
+		WRN("Only one hart came up, nobody to wake up\n");
+		INF("Press a key to continue...\n");
+		return 0;
+	}
+
+	struct hart_state *this_hs = hart_get_hstate_self();
+	int target = -1;
+	for (int i = 0; i < num_harts; i++) {
+		if (i != this_hs->hart_idx) {
+			target = i;
+			break;
+		}
+	}
+
+	/* Delay of ~100ms expressed in mtime ticks, and a generous tolerance:
+	 * the observed delay is always >= the request (IPI delivery and the
+	 * target's own mtime read at arm time only add to it), so the lower
+	 * bound just needs to be comfortably above 0 to reject an immediate
+	 * fire, and the upper bound absorbs scheduling slop. */
+	const uint64_t freq = mtimer_get_freq();
+	const uint64_t delay_ticks = freq / 10;			/* 100ms */
+	const uint64_t min_ticks = delay_ticks - (delay_ticks / 10);	/* 90% */
+	const uint64_t max_ticks = delay_ticks * 2;			/* 200% */
+
+	atomic_store_explicit(&timed_hart_done, 0, memory_order_relaxed);
+	observed_wakeup_tick = 0;
+
+	INF("Waking hart_idx %i after %lu ticks (~100ms @ %lu Hz)\n",
+	    target, delay_ticks, freq);
+
+	uint64_t t0 = mtimer_get_num_ticks();
+	hart_wakeup_with_addr(target, (uintptr_t)timed_wakeup_entry, 0, 0, delay_ticks);
+
+	/* Bounded wait for the target to run its entry (after the delay). The
+	 * spin budget is well above the ~100ms delay; if we exhaust it the
+	 * target is stuck in its sleep loop. */
+	uint32_t spins = 1000000000;
+	while (!atomic_load_explicit(&timed_hart_done, memory_order_acquire) && --spins)
+		pause();
+
+	if (!spins) {
+		ERR("Timed wakeup never fired (target stuck in sleep?)\n");
+		INF("Press a key to continue...\n");
+		return PROBE_FAILED;
+	}
+
+	uint64_t elapsed = observed_wakeup_tick - t0;
+	INF("Observed delay: %lu ticks (expected %lu..%lu)\n",
+	    elapsed, min_ticks, max_ticks);
+
+	int failures = 0;
+	if (elapsed < min_ticks || elapsed > max_ticks) {
+		ERR("Timed wakeup out of range\n");
+		failures++;
+	} else {
+		INF("Timed wakeup within tolerance\n");
+	}
+
+	INF("Press a key to continue...\n");
+	return failures ? PROBE_FAILED : 0;
+}
+REGISTER_PLATFORM("Hart timed wakeup test", test_wakeup_timed);
+#endif /* !defined(PLAT_NO_MTIMER) */
 
 #endif /* !defined(PLAT_NO_IPI) */

@@ -157,9 +157,11 @@ hart_jump_with_args(void)
 		DBG(" with arg0:0x%lx, arg1:0x%lx", arg0, arg1);
 	#ifndef PLAT_NO_MTIMER
 	if (mtimer_cycles) {
-		DBG(" at %li", mtimer_cycles);
+		DBG(" after %li ticks", mtimer_cycles);
 		hart_set_flags(hs, HS_FLAG_SLEEPING);
-		mtimer_arm_at(mtimer_cycles);
+		/* mtimer_cycles is a delay, not an absolute mtimecmp target:
+		 * mtime doesn't necessarily start from 0 (e.g. milkv-duos). */
+		mtimer_arm_after_ticks(mtimer_cycles);
 		mtimer_enable_irq();
 		while (hart_test_flags(hs, HS_FLAG_SLEEPING)) {
 			wfi();
